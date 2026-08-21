@@ -300,7 +300,7 @@ export default function GameRoom() {
 
   if (state.status === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-dvh flex items-center justify-center">
         <p className="text-sampaguita/50">Loading room…</p>
       </div>
     );
@@ -308,7 +308,7 @@ export default function GameRoom() {
 
   if (state.status === "error" || !game) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-5">
+      <div className="min-h-dvh flex items-center justify-center px-5">
         <Card className="p-8 max-w-md text-center">
           <h1 className="text-xl font-bold mb-2">Room not found</h1>
           <p className="text-sampaguita/60 text-sm mb-6">
@@ -345,7 +345,7 @@ export default function GameRoom() {
   if (game.status === "QUESTION") {
     if (!question) {
       return (
-        <div className="min-h-screen flex items-center justify-center">
+        <div className="min-h-dvh flex items-center justify-center">
           <p className="text-sampaguita/50">Loading question…</p>
         </div>
       );
@@ -365,7 +365,7 @@ export default function GameRoom() {
   if (game.status === "REVEAL") {
     if (!question || !reveal) {
       return (
-        <div className="min-h-screen flex items-center justify-center">
+        <div className="min-h-dvh flex items-center justify-center">
           <p className="text-sampaguita/50">Loading results…</p>
         </div>
       );
@@ -387,7 +387,7 @@ export default function GameRoom() {
   if (game.status === "LEADERBOARD") {
     if (!leaderboard) {
       return (
-        <div className="min-h-screen flex items-center justify-center">
+        <div className="min-h-dvh flex items-center justify-center">
           <p className="text-sampaguita/50">Loading leaderboard…</p>
         </div>
       );
@@ -419,7 +419,7 @@ export default function GameRoom() {
   }));
 
   return (
-    <div className="min-h-screen px-5 py-10 flex flex-col items-center">
+    <div className="min-h-dvh px-5 py-10 flex flex-col items-center">
       <div className="w-full max-w-lg flex flex-col gap-5">
         {disconnectBanner}
         <div>

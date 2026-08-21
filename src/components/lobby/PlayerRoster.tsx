@@ -26,7 +26,7 @@ export function PlayerRoster({
       {players.length === 0 ? (
         <p className="text-sm text-sampaguita/50">Waiting for players to join…</p>
       ) : (
-        <ul className="flex flex-wrap gap-2">
+        <ul className="flex flex-wrap gap-2.5">
           {players.map((p) => (
             <li
               key={p.id}
@@ -49,7 +49,7 @@ export function PlayerRoster({
                   type="button"
                   onClick={() => onRemove(p.id)}
                   aria-label={`Remove ${p.nickname} from the room`}
-                  className="ml-1 -mr-1 rounded-full w-5 h-5 flex items-center justify-center text-sampaguita/50 hover:text-sunset hover:bg-sunset/10 transition-colors"
+                  className="ml-0.5 -mr-1.5 -my-2 rounded-full w-8 h-8 flex items-center justify-center text-sampaguita/50 hover:text-sunset hover:bg-sunset/10 transition-colors touch-manipulation"
                 >
                   ×
                 </button>

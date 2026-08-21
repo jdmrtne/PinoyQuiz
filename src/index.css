@@ -42,6 +42,15 @@
       radial-gradient(circle at 12% 8%, rgba(124, 77, 218, 0.25), transparent 40%),
       radial-gradient(circle at 88% 4%, rgba(255, 177, 0, 0.18), transparent 38%);
     background-attachment: fixed;
+    /* Keep content clear of notches / home-indicator areas on iOS. Falls
+       back to 0px on devices without insets (env() with no matching
+       safe-area resolves to nothing, so the fallback in each call is
+       load-bearing, not decorative). Paired with viewport-fit=cover in
+       index.html — without that, env(safe-area-inset-*) always reads 0. */
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
   }
   h1, h2, h3, h4 {
     @apply font-display;

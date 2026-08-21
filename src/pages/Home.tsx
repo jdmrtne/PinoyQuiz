@@ -22,7 +22,7 @@ const categories = [
 
 export default function Home() {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-dvh flex flex-col">
       <div className="h-2 jeepney-stripes" aria-hidden="true" />
 
       <main className="flex-1 flex flex-col items-center px-5 pt-14 pb-10 max-w-3xl mx-auto w-full text-center">

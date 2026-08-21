@@ -78,7 +78,7 @@ export default function JoinGame() {
   }
 
   return (
-    <div className="min-h-screen px-5 py-10 flex flex-col items-center">
+    <div className="min-h-dvh px-5 py-10 flex flex-col items-center">
       <div className="w-full max-w-md">
         <Link to="/" className="text-sm text-sampaguita/50 hover:text-mango">
           ← Back

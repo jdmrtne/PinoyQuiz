@@ -5,11 +5,13 @@ culture, food, entertainment, sports, trivia, and slang — questions are
 Philippines-themed but written entirely in English. A host creates a room,
 friends join with a code or link, and everyone answers live, Kahoot-style.
 
-> **Status: Phase 9 complete** (security + anti-cheat hardening —
-> rate limiting on every mutating function, plus a `claim_host` race
-> fix). See [docs/MASTER_HANDOFF.md](docs/MASTER_HANDOFF.md) for
-> current state and next steps, and
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full phase plan.
+> **Status: Phase 10 complete** (mobile responsiveness + UI polish —
+> dynamic-viewport-height screens, iOS safe-area padding, and larger
+> touch targets on the answer buttons, option pills, and the host's
+> remove-player control). See
+> [docs/MASTER_HANDOFF.md](docs/MASTER_HANDOFF.md) for current state
+> and next steps, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for
+> the full phase plan.
 
 ## Tech stack
 

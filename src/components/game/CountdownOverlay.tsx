@@ -26,14 +26,14 @@ export function CountdownOverlay({
   }, [count]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <Card className="p-12 flex flex-col items-center gap-3">
+    <div className="min-h-dvh flex items-center justify-center px-5">
+      <Card className="p-8 sm:p-12 flex flex-col items-center gap-3">
         <p className="text-sm uppercase tracking-wide text-sampaguita/50">
           Get ready
         </p>
         <span
           key={count}
-          className="font-display text-8xl font-bold text-mango animate-[pulse_1s_ease-in-out]"
+          className="font-display text-6xl sm:text-8xl font-bold text-mango animate-[pulse_1s_ease-in-out]"
           aria-live="polite"
         >
           {count > 0 ? count : "Go!"}

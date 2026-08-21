@@ -22,7 +22,7 @@ export function QuestionScreen({
   const timeUp = remaining <= 0;
 
   return (
-    <div className="min-h-screen px-5 py-8 flex flex-col items-center">
+    <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
       <div className="w-full max-w-lg flex flex-col gap-6">
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold text-sampaguita/60">
@@ -54,7 +54,7 @@ export function QuestionScreen({
                 disabled={disabled}
                 onClick={() => onAnswer(i)}
                 aria-pressed={isPicked}
-                className={`flex items-center gap-3 rounded-2xl border-2 px-5 py-4 text-left text-lg font-semibold transition-colors ${
+                className={`flex items-center gap-3 rounded-2xl border-2 px-5 py-4 min-h-[3.25rem] text-left text-lg font-semibold transition-colors touch-manipulation ${
                   isPicked
                     ? "border-mango bg-mango/10 text-sampaguita"
                     : "border-ink-3 bg-ink-2 text-sampaguita/90"

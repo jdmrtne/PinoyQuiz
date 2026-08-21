@@ -776,3 +776,125 @@ handoff warned about again this session, same fix):
 
 **Next phase:** Phase 10 — mobile responsiveness + UI polish.
 
+## Phase 10 — Mobile responsiveness + UI polish ✅
+
+**Scope, per `docs/MASTER_HANDOFF.md`'s Phase 10 section:** a real pass on
+small-viewport layout (not just "it uses Tailwind so it's probably
+fine"), tap target sizes on the answer-option buttons specifically, text
+wrapping on long nicknames/prompts, and how the countdown/timer UI
+behaves on narrow screens — extending `src/index.css`'s existing design
+tokens rather than introducing new ones or falling back to generic
+Tailwind defaults.
+
+**What was actually a gap vs. what wasn't (reviewed screen by screen,
+not assumed):**
+- **`min-h-screen` (`100vh`) was a real gap.** Every full-page wrapper in
+  the app (17 usages across 9 files) used it. On mobile Safari/Chrome,
+  `100vh` is pinned to the viewport height with the address bar hidden,
+  so a `min-h-screen` element can be taller than what's actually visible
+  once the chrome is showing — the exact "cut off behind mobile browser
+  chrome" failure mode the handoff called out for the countdown/timer UI
+  specifically, except it applied to every screen in the app, not just
+  those two.
+- **Touch targets were a real, measurable gap in one place:**
+  `PlayerRoster`'s host-only remove ("×") control was `w-5 h-5` — a 20px
+  hit area, well under the ~44px baseline (Apple HIG, WCAG 2.5.5) this
+  kind of tappable icon-only control should meet. `QuestionScreen`'s
+  answer buttons (the "screen under the most real-world mobile pressure"
+  per the handoff) were, on inspection, already comfortably sized —
+  `px-5 py-4` with `text-lg` works out to roughly 60px tall — so this
+  wasn't the gap the handoff worried it might be; it got a `min-h-[3.25rem]`
+  floor anyway as insurance against a short one-word option shrinking
+  that height, plus `touch-manipulation`.
+- **Text wrapping on long nicknames/prompts needed no changes.**
+  `LeaderboardScreen` and `Results` already `truncate` long nicknames;
+  question prompts and answer option text already wrap normally inside
+  block-level elements with no fixed width. Reviewed, confirmed fine, not
+  touched.
+- **`TextField` needed no changes.** Already `text-lg` (18px), which
+  avoids iOS Safari's well-known auto-zoom-on-focus behavior for inputs
+  under 16px — this was already correct from Phase 1, not a Phase 10 gap.
+
+**What was built:**
+- All 17 `min-h-screen` usages (`Home`, `CreateGame`, `JoinGame`,
+  `GameRoom`'s six status branches, `Results`' four branches,
+  `CountdownOverlay`, `QuestionScreen`, `RevealScreen`,
+  `LeaderboardScreen`) switched to `min-h-dvh` (dynamic viewport height),
+  which tracks the browser chrome's actual current state instead of the
+  largest-possible-viewport assumption `100vh` makes.
+- `index.html` — `viewport-fit=cover` added to the viewport meta tag.
+- `src/index.css` — `body` now pads itself with
+  `env(safe-area-inset-{top,bottom,left,right}, 0px)` (explicit `0px`
+  fallback for non-notched devices) so content clears the notch/
+  home-indicator area on iOS. Only takes effect paired with the
+  `viewport-fit=cover` change above — without it, `env(safe-area-inset-*)`
+  always reads 0.
+- `src/components/ui/Button.tsx` — added `touch-manipulation` to the
+  shared base classes, so every CTA in the app (both `CreateGame`/
+  `JoinGame` submit buttons and every host-only advance/start button)
+  picks up faster tap response in one place rather than needing it added
+  per call site.
+- `src/components/game/QuestionScreen.tsx` — answer buttons gained
+  `min-h-[3.25rem]` (52px floor) and `touch-manipulation`.
+- `src/components/ui/SelectPills.tsx` — the four option-pill groups on
+  `CreateGame` (category, difficulty, question count, time limit) gained
+  `min-h-[2.75rem]` (44px floor, matching the WCAG baseline exactly) and
+  `touch-manipulation`.
+- `src/components/lobby/PlayerRoster.tsx` — the remove-player control
+  grew from `w-5 h-5` (20px) to `w-8 h-8` (32px) using negative margins so
+  the larger hit area doesn't push the roster pill itself taller; pill
+  gap increased from `gap-2` to `gap-2.5` so the larger hit areas don't
+  overlap a neighboring pill's own control.
+- `src/components/game/CountdownOverlay.tsx` — the one fixed-size element
+  in the app with no responsive adjustment (`p-12`/`text-8xl` regardless
+  of viewport) now steps down to `p-8`/`text-6xl` below the `sm:`
+  breakpoint, and its wrapper gained `px-5` so the card has a guaranteed
+  safety margin from the screen edges on narrow phones.
+
+**Validated by testing:**
+- `npm run build` (`tsc -b && vite build`) passes with zero errors.
+  Manually confirmed the new utilities actually compiled into the CSS
+  bundle rather than silently no-op'ing (Tailwind v4 has to recognize an
+  arbitrary-value/dynamic-viewport utility to emit it) — `grep`'d
+  `dist/assets/*.css` for `min-height:100dvh`, `.touch-manipulation{...}`,
+  and all four `env(safe-area-inset-*)` calls; all present.
+- `npm run lint` (oxlint) reports exactly the same 110 pre-existing
+  errors as every prior phase's documented baseline — confirmed this
+  phase's changes added zero new lint errors.
+- Diffed the full working tree against a fresh, unmodified extract of the
+  pre-Phase-10 project: exactly the 9 files intentionally touched
+  differ, confirming no incidental changes elsewhere.
+- Reviewed every touched screen's layout by direct pixel math against a
+  320px-wide baseline (the narrowest common real device width) rather
+  than by eye — e.g. confirmed `CountdownOverlay`'s "Go!" text at the new
+  `text-6xl` fits comfortably inside a 320px viewport minus its `px-5`
+  safety margin and `p-8` card padding, and that `PlayerRoster`'s
+  enlarged 32px remove control's negative-margin hit area doesn't
+  overlap into a neighboring pill given the new `gap-2.5` spacing.
+
+**Not included in this phase, and why:**
+- **No actual rendered-viewport screenshot/device-emulator comparison.**
+  This sandbox has no headless browser or device emulator available — no
+  domain that would serve one is in the network allowlist (`web_search`/
+  `web_fetch` and the package registries only). This is the same shape of
+  limitation Phase 4's handoff documented for live Supabase Realtime wire
+  behavior: validated as thoroughly as this sandbox allows (build
+  correctness, compiled-CSS inspection, and manual pixel-math review
+  against real device widths), explicitly not presented as a substitute
+  for an actual phone or browser dev-tools device-mode pass. That manual
+  check is the next real-world validation step, same as Phase 4/8 left
+  Realtime's live wire behavior for a real Supabase project.
+- **`HostDisconnectedBanner` and the leaderboard "N of M connected"
+  note** (both named in the Phase 10 handoff as deferred-by-name from
+  Phase 8) already render using the same `Card`/`Button`/`min-h-dvh`
+  primitives every other screen was just brought in line with, and
+  needed no component-specific changes beyond that.
+- **No new design tokens.** Every change above reuses `src/index.css`'s
+  existing token system (colors, radii, fonts) — nothing new was added to
+  `@theme`, per the handoff's explicit instruction not to introduce new
+  tokens or fall back to generic Tailwind defaults.
+- Did not touch the question bank (Phase 14) or start Phase 11
+  (testing + bug fixing).
+
+**Next phase:** Phase 11 — testing + bug fixing.
+

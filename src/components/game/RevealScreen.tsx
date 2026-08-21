@@ -28,7 +28,7 @@ export function RevealScreen({
   const noAnswer = reveal.yourAnswerIndex === null;
 
   return (
-    <div className="min-h-screen px-5 py-8 flex flex-col items-center">
+    <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
       <div className="w-full max-w-lg flex flex-col gap-6">
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold text-sampaguita/60">

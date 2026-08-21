@@ -20,7 +20,7 @@ today.
 | 7 | Leaderboard + final results | ✅ Done |
 | 8 | Disconnect/reconnect handling | ✅ Done |
 | 9 | Security + anti-cheat hardening | ✅ Done |
-| 10 | Mobile responsiveness + UI polish | ⬜ Not started |
+| 10 | Mobile responsiveness + UI polish | ✅ Done |
 | 11 | Testing + bug fixing | ⬜ Not started |
 | 12 | Production deployment | ⬜ Not started |
 
@@ -569,4 +569,68 @@ See `docs/MASTER_HANDOFF.md` and `CHANGELOG.md`'s Phase 9 entry for full
 detail, including the specific per-function limits chosen and the testing
 methodology.
 
-Next up: **Phase 10 — mobile responsiveness + UI polish**.
+## Phase 10 — mobile responsiveness + UI polish (done)
+
+No prior phase had reviewed the app's small-viewport behavior as a
+dedicated pass, so this phase started from a real review of every screen
+against phone-width layout concerns rather than assuming "Tailwind makes
+it fine." Two categories of real (not hypothetical) issues came out of
+that review:
+
+- **`min-h-screen` (`100vh`) on every full-page wrapper.** On mobile
+  Safari/Chrome, `100vh` is measured against the *largest* possible
+  viewport (address bar hidden), so content sized to `100vh` gets clipped
+  or forces an awkward extra scroll the moment the address bar is
+  showing — exactly the kind of thing that reads as "probably fine" on a
+  desktop browser and isn't. Every one of these (`Home`, `CreateGame`,
+  `JoinGame`, `GameRoom`'s lobby/loading/COUNTDOWN/QUESTION/REVEAL/
+  LEADERBOARD branches, `Results`, `CountdownOverlay`, `QuestionScreen`,
+  `RevealScreen`, `LeaderboardScreen`) now uses `min-h-dvh` (dynamic
+  viewport height) instead, which tracks the browser chrome's actual
+  current state.
+- **Touch targets smaller than the ~44px baseline** most mobile guidance
+  (Apple HIG, WCAG 2.5.5) converges on. The most consequential one:
+  `PlayerRoster`'s host-only remove ("×") control was a 20px hit area.
+  `QuestionScreen`'s answer buttons were already comfortably sized
+  (`py-4`/`text-lg` ⇒ ~60px) but got an explicit `min-h-[3.25rem]` floor
+  so a short one-word answer can't shrink the tap target, plus
+  `touch-manipulation` so a tap registers immediately instead of waiting
+  out the browser's default double-tap-zoom delay. `SelectPills` (used
+  four times on `CreateGame` — category, difficulty, question count, time
+  limit) got the same `touch-manipulation` treatment and a `min-h-[2.75rem]`
+  floor. `touch-manipulation` was also added to the shared `Button`
+  primitive itself, so every CTA in the app picks it up in one place.
+
+Also addressed, extending the existing design-token system (Phase 1)
+rather than introducing new ones:
+
+- **iOS safe areas.** `index.html`'s viewport meta gained
+  `viewport-fit=cover`, and `body` in `src/index.css` now pads itself with
+  `env(safe-area-inset-*)` (each with an explicit `0px` fallback for
+  devices without a notch/home-indicator) so content on a notched or
+  gesture-nav phone doesn't sit under either.
+- **`CountdownOverlay`'s fixed `p-12`/`text-8xl` sizing**, the single
+  largest fixed-size element in the app with zero small-screen
+  adjustment, now steps down to `p-8`/`text-6xl` below the `sm:`
+  breakpoint, and its wrapper gained `px-5` so the card can never touch
+  the screen edges on a narrow phone.
+
+**What was reviewed and found to already be fine, not touched:**
+`QuestionScreen`/`RevealScreen`'s answer-option layout (already
+single-column, already wraps long option text normally), `Home`'s
+hero/CTAs/step grid (already used `sm:` breakpoints throughout),
+`LeaderboardScreen`/`Results`' player rows (already `truncate` long
+nicknames), `TextField` (already `text-lg`, which avoids iOS Safari's
+auto-zoom-on-focus for inputs under 16px).
+
+**Explicit limitation, same shape as Phase 4's Realtime-wire-behavior
+gap:** this sandbox has no headless browser or device emulator available
+(no matching domain in the network allowlist to fetch one), so this pass
+is real/careful CSS + pixel-math review and a clean `npm run build`, not
+an actual rendered-viewport screenshot comparison. Documented here rather
+than silently presented as fully device-tested — a real phone or
+browser dev-tools device-mode pass is the needed manual check, the same
+category of gap Phase 4/8's handoffs left for live Realtime wire
+behavior.
+
+Next up: **Phase 11 — testing + bug fixing**.
