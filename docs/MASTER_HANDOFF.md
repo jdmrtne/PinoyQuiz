@@ -6,29 +6,42 @@ technical design and per-phase implementation detail, see
 [docs/ARCHITECTURE.md](ARCHITECTURE.md); for a chronological log of every
 change and how it was tested, see [../CHANGELOG.md](../CHANGELOG.md).
 
-## Current state: Phase 7 complete ✅
+## Current state: Phase 8 complete ✅
 
-**Phases 1–7 are done and validated.** The game now supports the entire
-core loop: create a room → join via code/link → realtime lobby → host
-starts the game → countdown → question 1 → players answer → reveal →
-leaderboard → next question → … → reveal on the last question →
-leaderboard → **every client** (host and non-host, at the same time) is
-routed to `/results/:roomCode` → final rankings, with "Play Again"/"Back
-Home" CTAs.
+**Phases 1–8 are done and validated.** The game now supports the entire
+core loop, and survives players (including the host) dropping mid-game:
 
 ```
 WAITING → COUNTDOWN → QUESTION → REVEAL → LEADERBOARD → (next QUESTION | FINISHED)
 ```
 
-**What it cannot do yet:** survive anyone dropping connection mid-game.
-If the host closes their tab while the game is on `LEADERBOARD` (or
-`QUESTION`, waiting for their timer to fire `end_question`), everyone
-else is stuck — there's no one left who can call the next host-only
-transition function. `players.connected`/`last_seen_at` already exist and
-`join_game` already flips `connected = true` on rejoin (see
-`0007_room_functions.sql`), but nothing yet detects a *drop*, migrates
-host privileges, or lets a returning player rejoin an in-progress game
-smoothly from the UI. That's Phase 8, described below.
+Any client's own periodic heartbeat (`src/hooks/useHeartbeat.ts`, every
+8s) both proves that client is still around and sweeps the roster for
+anyone who's gone quiet for 20+ seconds. If the stale player was the
+host, any remaining connected player can trigger `claim_host`, which
+deterministically reassigns hosting to the earliest-joined still-
+connected player (not necessarily whoever clicked) — so a host closing
+their tab mid-`QUESTION`/`REVEAL`/`LEADERBOARD`/even mid-`COUNTDOWN` no
+longer permanently strands everyone else. This was validated end-to-end,
+not just function-by-function: a scripted scenario starts a 2-question
+game, kills the host mid-first-question, has the surviving player claim
+host and single-handedly drive the game to `FINISHED` with correct
+scores (see CHANGELOG's Phase 8 entry for the full test list).
+
+Rejoining an in-progress game from the UI also now works correctly after
+a hard refresh or a directly-opened `/game/:roomCode` link — `GameRoom`/
+`Results` no longer rely solely on React Router's `location.state` (which
+doesn't survive either of those) to know "who am I"; they re-derive it
+from the roster + the browser's persisted anonymous auth session
+(`src/hooks/useCurrentUserId.ts`).
+
+**What it still cannot do:** recover if *every* participant disconnects
+at once (nobody's left to run the staleness sweep or claim host — would
+need a server-side scheduled job, deliberately not introduced, see
+below), and detection always has up to ~20s of lag rather than an instant
+signal. Both are documented trade-offs from the mechanism choice, not
+oversights — see `supabase/migrations/0013_disconnect_reconnect.sql`'s
+header comment for the reasoning.
 
 ## Phase roadmap (see ARCHITECTURE.md for full detail)
 
@@ -41,97 +54,109 @@ smoothly from the UI. That's Phase 8, described below.
 | 5 | Question system + game engine | ✅ Done (partial question bank — 80/240) |
 | 6 | Answer submission + scoring | ✅ Done |
 | 7 | Leaderboard + final results | ✅ Done |
-| 8 | Disconnect/reconnect handling | ⬜ **Next task** |
-| 9 | Security + anti-cheat hardening | ⬜ Not started |
+| 8 | Disconnect/reconnect handling | ✅ Done |
+| 9 | Security + anti-cheat hardening | ⬜ **Next task** |
 | 10 | Mobile responsiveness + UI polish | ⬜ Not started |
 | 11 | Testing + bug fixing | ⬜ Not started |
 | 12 | Production deployment | ⬜ Not started |
 | 14 | Expand question bank to 240 | ⬜ Not started (deferred from Phase 5) |
 
-## What Phase 7 actually built (so you don't re-derive it)
+## What Phase 8 actually built (so you don't re-derive it)
 
-- `supabase/migrations/0012_leaderboard.sql`:
-  - `get_leaderboard(game_id)` — any participant, any status. Returns
-    ranked standings (`out_player_id`, `out_nickname`, `out_score`,
-    `out_rank`, `out_score_delta`). `score_delta` is the points earned on
-    whatever question `games.current_question_id` currently points at —
-    computed server-side (the same reason `get_answer_reveal` computes
-    `percent_correct` server-side: `answers_select_own` RLS blocks a
-    client from reading another player's `answers` rows directly). This
-    single function backs both the mid-game `LEADERBOARD` screen *and*
-    the final `Results` page — at `FINISHED`, `current_question_id` still
-    points at the last question played, so the delta is just "how the
-    final question went" and Results ignores it, using only score/rank.
-  - `advance_to_leaderboard(game_id)` — host-only, `REVEAL → LEADERBOARD`.
-  - `advance_question(game_id)` — host-only. `LEADERBOARD → QUESTION`
-    (next one, re-anchoring `question_started_at` the same way
-    `begin_first_question` does) if `current_question_index + 1 <
-    question_count`, else `LEADERBOARD → FINISHED` + `finished_at = now()`.
-- `src/lib/gameApi.ts` — `advanceToLeaderboard`, `getLeaderboard`,
-  `advanceQuestion`, reusing the `LeaderboardEntry` type already defined
-  in `src/types/game.ts` since Phase 1.
-- `LeaderboardScreen` (new, `src/components/game/`) + a host-only "See
-  Leaderboard" button added to `RevealScreen` (previously just text
-  saying "Phase 7 will add this").
-- `GameRoom.tsx` — new `LEADERBOARD` branch; a `FINISHED` effect that
-  `navigate()`s every client to `/results/:roomCode` (fires for host and
-  non-host alike since `game.status` arrives via the existing Realtime
-  subscription on `games`).
-- `Results.tsx` — no longer a placeholder; final rankings via
-  `get_leaderboard`, medal-style top-3, "(you)" highlight, "Play
-  Again"/"Back Home".
+- `supabase/migrations/0013_disconnect_reconnect.sql`:
+  - `heartbeat(game_id)` — any participant, own row only. Sets
+    `connected = true, last_seen_at = now()`.
+  - `mark_stale_players(game_id)` — any participant (deliberately not
+    host-only — the host is exactly who might be missing). Flips
+    `connected = false` for anyone in that game whose `last_seen_at` is
+    more than 20 seconds old. Idempotent; safe to call redundantly from
+    every client's own timer at slightly different times.
+  - `claim_host(game_id)` — any participant other than the current host.
+    Re-checks staleness server-side (20s threshold, same as
+    `mark_stale_players`) rather than trusting the caller's view; rejects
+    with "The host is still connected" otherwise. On success, picks the
+    earliest-joined currently-`connected` player (excluding the outgoing
+    host) as the new host — deterministic, so simultaneous claim attempts
+    from different clients converge on the same answer — and updates
+    both that player's `is_host` and `games.host_user_id`.
+  - **Why heartbeat/staleness instead of Realtime Presence** (which
+    `docs/ARCHITECTURE.md` had flagged as the more "natural" fit): this
+    sandbox cannot exercise live Supabase Realtime wire behavior at all
+    (same limitation noted since Phase 4), Presence included. A
+    heartbeat is a plain function + `UPDATE`, fully testable against the
+    disposable local Postgres this project has used to validate every
+    phase, and it broadcasts through the *already-validated*
+    `postgres_changes` subscription on `players` instead of needing a
+    new Realtime feature. Trade-off is real (~20s lag vs. near-instant)
+    and worth revisiting once this can be checked against a live
+    project — but it's a deliberate, documented choice, not a shortcut.
+- `src/lib/gameApi.ts` — `heartbeat`, `markStalePlayers`, `claimHost`.
+- `src/hooks/useCurrentUserId.ts` (new) — also closes a real pre-existing
+  gap: identity used to come only from router state, which a hard
+  refresh or a direct link loses. Now derived from the roster.
+- `src/hooks/useHeartbeat.ts` (new) — every 8s, `heartbeat()` +
+  `markStalePlayers()`, for as long as this player's identity is known
+  and the game isn't `FINISHED`.
+- `GameRoom.tsx` — identity rewired onto `useCurrentUserId`; heartbeat
+  wired in; new `HostDisconnectedBanner` (non-host players only, shown
+  once the host's `connected` flag reads false) rendered above every
+  in-progress phase screen.
+- `LeaderboardScreen` — optional "N of M connected" note.
+- `Results.tsx` — same identity fix as `GameRoom.tsx`.
 
-## Next task: Phase 8 — disconnect/reconnect handling
+## Next task: Phase 9 — security and anti-cheat hardening
 
-The state machine is now a complete loop, but every transition in it is
-still **host-triggered from the host's own client** (`start_game`,
-`begin_first_question`, `end_question`, `advance_to_leaderboard`,
-`advance_question`) — there is no server-side fallback. Concretely, this
-phase needs to cover at least:
+`docs/ARCHITECTURE.md`'s roadmap table names this next; check that file
+for whatever specifics it has (search for "Phase 9" and "anti-cheat") the
+same way Phase 8's section there pointed at "Presence"/"disconnect"
+before starting. Based on what's already in place vs. not, at minimum
+this phase likely needs to look at:
 
-1. **Detecting a drop.** Nothing currently flips `players.connected` to
-   `false` or updates `last_seen_at` on disconnect — only `join_game`'s
-   reconnect path touches those columns today. Decide the mechanism:
-   Supabase Realtime Presence (a second channel alongside the existing
-   `postgres_changes` one in `useGameRealtime.ts`) is the natural fit for
-   "who's actually got a live socket open right now," separate from the
-   `connected` DB column, which could instead become "haven't ack'd in
-   N seconds" via a heartbeat. Check whether `docs/ARCHITECTURE.md` has
-   more specific guidance (search it for "Presence" and "disconnect")
-   before inventing an approach from scratch.
-2. **Host migration.** If the *host's* connection drops mid-game, someone
-   else needs to become host so the game isn't permanently stuck on
-   whichever host-only transition was next. Likely a new
-   `SECURITY DEFINER` function (`transfer_host` or similar) — decide
-   whether it's automatic (server picks the next-oldest connected player)
-   or requires an explicit action from a remaining player.
-3. **Rejoining an in-progress game from the UI.** The RPC-level plumbing
-   already exists (`join_game`'s reconnect branch returns the current
-   `out_status` regardless of phase), but `JoinGame.tsx` and `GameRoom.tsx`
-   haven't been exercised against a game that's already past `WAITING` —
-   confirm the full client flow (rejoin mid-`QUESTION`, mid-`LEADERBOARD`,
-   etc.) actually lands the returning player in the right render branch
-   with correct state (e.g. they should probably see themselves as "not
-   yet answered" rather than crash if `getCurrentQuestion` returns a
-   question they haven't submitted for yet).
-4. **UI affordances.** Roster already dims disconnected players
-   (`PlayerRoster.tsx`'s `!p.connected && "opacity-40"`) — decide whether
-   that's sufficient during live play too, or whether `QuestionScreen`/
-   `LeaderboardScreen` need their own "N of M connected" indicator.
+1. **Rate limiting on state-transition functions.** Nothing currently
+   stops a malicious client from hammering `submit_answer`,
+   `advance_question`, `claim_host`, etc. in a tight loop. Every one of
+   these functions already has its own correctness checks (right phase,
+   right caller, etc.), but repeated *valid* calls in quick succession —
+   e.g. spamming `mark_stale_players` — aren't rate-limited at all. Decide
+   whether this needs a real mechanism (a `rate_limit_hits` table + a
+   check at the top of each function, or Supabase's built-in
+   `auth.rate_limit` type features if applicable) or whether the
+   `SECURITY DEFINER` + RLS model already makes this a non-issue in
+   practice (spamming a correctly-guarded function mostly just wastes the
+   caller's own quota, not others' game state) — that determination
+   itself is Phase 9 work, not something to assume either way.
+2. **`claim_host` abuse potential specifically** — new in Phase 8, so
+   Phase 7's security review never looked at it. Worth checking: can a
+   player deliberately stop heartbeating to force a host transfer away
+   from an active host who's just being slow, then heartbeat again
+   immediately after to "steal" a game? Current design requires the
+   *outgoing* host to actually go 20s+ stale first (checked server-side),
+   so a healthy host can't be forced out by someone else's inaction —
+   but confirm there isn't a subtler race (e.g. calling `claim_host`
+   in the same instant the real host's heartbeat lands).
+3. **Timing/scoring anti-cheat beyond what Phase 6 already built** —
+   `submit_answer` already computes `response_time_ms` server-side from
+   `question_started_at`, never a client-reported value (see Phase 6's
+   CHANGELOG entry), so the obvious "claim I answered instantly" vector
+   is already closed. Check `docs/ARCHITECTURE.md`'s "Security model"
+   section for whatever else it flags as still open.
+4. Whatever else `docs/ARCHITECTURE.md`'s own Phase 9 notes (if any exist
+   beyond the roadmap table) call out — read it before assuming this list
+   above is complete; it was compiled from the current codebase's own
+   gaps, not from architecture doc content specific to Phase 9, since
+   that section wasn't fleshed out in detail the way Phase 8's was.
 
 ## How to test your work (do this — don't just review the SQL)
 
 Every phase so far has been validated against a **disposable local
-Postgres**, not just read over, and every phase caught at least one real
-bug this way (see CHANGELOG.md phase-by-phase; Phase 7 confirmed correct
-`score_delta`/rank behavior across a full 3-question game and a
-single-question edge case this way). Reproduce that setup:
+Postgres**, not just read over. Reproduce that setup:
 
 ```bash
 # Postgres 16 was installed via apt in this sandbox; a fresh sandbox needs:
-# (the nodesource.sources apt list may need moving out of
+# (the nodesource.sources apt list needs moving out of
 # /etc/apt/sources.list.d/ first if `apt-get update` 403s on it — that's
-# an unrelated broken repo in this sandbox image, not a project issue)
+# an unrelated broken repo in this sandbox image, not a project issue —
+# hit again this session, same as the last two)
 apt-get update -qq && apt-get install -y -qq postgresql postgresql-contrib
 service postgresql start
 su postgres -c "createdb pinoyquiz_test"
@@ -158,7 +183,7 @@ Also needs a stub `supabase_realtime` publication before running
 `0008_realtime.sql`: `create publication supabase_realtime;`.
 
 Then run every migration file in `supabase/migrations/` **in numeric
-order** (`0001` through the newest — currently `0012`), then the seed
+order** (`0001` through the newest — currently `0013`), then the seed
 file in `supabase/seed/`, then simulate real users with a `do $$ ... $$`
 block: `insert into auth.users default values returning id into
 v_some_var;`, switch "who's calling" between statements with
@@ -181,19 +206,27 @@ functions take `smallint` parameters (`submit_answer`'s
 `p_selected_option`, `create_game`'s `p_question_count`/
 `p_time_limit_seconds`) — an untyped integer literal like `submit_answer(v_game_id, 0)`
 will fail to resolve against the function signature; write
-`submit_answer(v_game_id, 0::smallint)`. Bit us again this session, same
-as it apparently did in an earlier one — worth remembering.
+`submit_answer(v_game_id, 0::smallint)`. Bit this project again this
+session (third time now — Phase 5 and an earlier one too) — worth
+remembering.
+
+**New in Phase 8 — simulating a stale player in tests:** to test
+staleness-dependent behavior (`mark_stale_players`, `claim_host`)
+without actually waiting 20+ seconds, just backdate the row directly:
+`update players set last_seen_at = now() - interval '25 seconds' where
+user_id = v_some_uid;` before calling the function under test. This is
+what every Phase 8 test scenario does — no `pg_sleep` needed.
 
 **After the SQL is validated:** run `npm run build` (not a bare
 `tsc --noEmit` — see Phase 3's CHANGELOG entry for why that's misleading
 on this project's tsconfig) and fix everything it reports before calling
 the phase done. `npm run lint` (oxlint) currently reports 110
 pre-existing errors and a large, growing number of warnings unrelated to
-this project's own code — verified by diffing against a fresh unmodified
-extract of the project before Phase 7's changes, which showed the exact
-same 110 errors. Don't chase those down as part of an unrelated phase;
-just confirm your changes don't add *new* errors to that count (they
-didn't, Phase 6→7: 110 before, 110 after).
+this project's own code — verified again this session by running lint
+against a fresh unmodified extract of the pre-Phase-8 project side by
+side, which showed the exact same 110 errors both before and after.
+Don't chase those down as part of an unrelated phase; just confirm your
+changes don't add *new* errors to that count.
 
 ## Things to *not* redo
 
@@ -202,12 +235,11 @@ didn't, Phase 6→7: 110 before, 110 after).
   sequence, and rushing it would violate the accuracy bar documented in
   Phase 5's CHANGELOG entry.
 - Don't rebuild Realtime, RLS, the create/join functions, the
-  WAITING→COUNTDOWN→QUESTION→REVEAL transitions, or the new
-  REVEAL→LEADERBOARD→(QUESTION|FINISHED) transitions from Phase 7 — all
-  implemented and tested. Reuse `useGameRealtime`, the existing
-  `gameApi.ts` patterns, and the existing design tokens (`src/index.css`)
-  rather than introducing new ones.
-- Don't skip ahead to Phase 9 (anti-cheat hardening) or Phase 10 (mobile
-  polish) — Phase 8 is the immediate next task, and the game isn't
-  reliable for real multiplayer use (as opposed to a demo with everyone
-  staying connected the whole time) without it.
+  WAITING→COUNTDOWN→QUESTION→REVEAL→LEADERBOARD→(QUESTION|FINISHED)
+  transitions, or the new heartbeat/staleness/host-transfer mechanics from
+  Phase 8 — all implemented and tested. Reuse `useGameRealtime`,
+  `useHeartbeat`, `useCurrentUserId`, the existing `gameApi.ts` patterns,
+  and the existing design tokens (`src/index.css`) rather than
+  introducing new ones.
+- Don't skip ahead to Phase 10 (mobile polish) or beyond — Phase 9 is the
+  immediate next task.

@@ -18,6 +18,8 @@ export function LeaderboardScreen({
   isLastQuestion,
   onAdvance,
   advancing,
+  connectedCount,
+  totalCount,
 }: {
   entries: LeaderboardEntry[];
   currentPlayerId: string | null;
@@ -25,7 +27,20 @@ export function LeaderboardScreen({
   isLastQuestion: boolean;
   onAdvance: () => void;
   advancing: boolean;
+  /**
+   * Phase 8: shown as a small "N of M connected" note under the header
+   * when someone's missing, so players understand why a rejoined
+   * teammate momentarily looked greyed out — or why the game is stuck if
+   * the host is one of the missing ones (see HostDisconnectedBanner,
+   * rendered separately above this screen). Both counts come from the
+   * same `players.connected` column PlayerRoster already dims on.
+   */
+  connectedCount?: number;
+  totalCount?: number;
 }) {
+  const showConnectionNote =
+    connectedCount !== undefined && totalCount !== undefined && connectedCount < totalCount;
+
   return (
     <div className="min-h-screen px-5 py-8 flex flex-col items-center">
       <div className="w-full max-w-lg flex flex-col gap-6">
@@ -34,6 +49,11 @@ export function LeaderboardScreen({
           <p className="text-sampaguita/60 text-sm">
             Standings after this question
           </p>
+          {showConnectionNote && (
+            <p className="text-xs text-sampaguita/40 mt-1">
+              {connectedCount} of {totalCount} players connected
+            </p>
+          )}
         </div>
 
         <Card className="p-3 flex flex-col gap-2">

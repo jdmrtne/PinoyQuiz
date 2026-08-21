@@ -8,9 +8,12 @@ import { CountdownOverlay } from "../components/game/CountdownOverlay";
 import { QuestionScreen } from "../components/game/QuestionScreen";
 import { RevealScreen } from "../components/game/RevealScreen";
 import { LeaderboardScreen } from "../components/game/LeaderboardScreen";
+import { HostDisconnectedBanner } from "../components/game/HostDisconnectedBanner";
 import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "../data/gameOptions";
 import { useGameRealtime } from "../hooks/useGameRealtime";
 import { useServerTimer } from "../hooks/useServerTimer";
+import { useCurrentUserId } from "../hooks/useCurrentUserId";
+import { useHeartbeat } from "../hooks/useHeartbeat";
 import {
   removePlayer,
   startGame,
@@ -22,6 +25,7 @@ import {
   advanceToLeaderboard,
   getLeaderboard,
   advanceQuestion,
+  claimHost,
   GameApiError,
   type CurrentQuestion,
   type AnswerReveal,
@@ -41,10 +45,43 @@ export default function GameRoom() {
   const [reveal, setReveal] = useState<AnswerReveal | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [advancing, setAdvancing] = useState(false);
+  const [claimingHost, setClaimingHost] = useState(false);
   const endQuestionCalledRef = useRef<string | null>(null);
 
-  const isHost = navState?.isHost ?? false;
-  const currentPlayerId = navState?.playerId ?? null;
+  // Phase 8: "who am I in this game" no longer relies solely on
+  // location.state — that's only present when you *navigated* here from
+  // CreateGame/JoinGame, and is gone after a hard refresh or opening a
+  // saved/shared /game/:roomCode link directly. Once the roster has
+  // loaded, find our own row by matching this browser's persisted auth
+  // session (see useCurrentUserId) against players[].user_id — RLS already
+  // exposes that column to any fellow participant (Phase 2). navState is
+  // kept only as a fallback for the brief window before the roster's
+  // first fetch resolves, so there's no flash of "not host" for a host
+  // who just created the game.
+  const userId = useCurrentUserId();
+  const myPlayer = players.find((p) => p.user_id === userId) ?? null;
+  const isHost = myPlayer?.is_host ?? navState?.isHost ?? false;
+  const currentPlayerId = myPlayer?.id ?? navState?.playerId ?? null;
+
+  // Keep this player's connected/last_seen_at fresh, and opportunistically
+  // sweep the roster for anyone who's gone stale — see useHeartbeat.ts and
+  // 0013_disconnect_reconnect.sql. Runs for any known player in any
+  // pre-FINISHED phase (including the WAITING lobby — a host can vanish
+  // before ever starting the game too).
+  useHeartbeat(
+    game?.id ?? null,
+    currentPlayerId,
+    !!game && game.status !== "FINISHED"
+  );
+
+  // The live host row (if any) — used both to show "N connected" context
+  // and to decide whether to offer a "Become host" control to everyone
+  // else. `connected` here is the same Realtime-synced column
+  // PlayerRoster already dims on, so this reuses a signal that's already
+  // proven reliable rather than inventing a second one.
+  const hostPlayer = players.find((p) => p.is_host) ?? null;
+  const hostLooksStale = !!hostPlayer && !hostPlayer.connected && hostPlayer.id !== currentPlayerId;
+  const connectedCount = players.filter((p) => p.connected).length;
 
   // Fetch the live question whenever the game enters QUESTION state (or the
   // current question changes — i.e. advancing to a future question in
@@ -226,6 +263,25 @@ export default function GameRoom() {
     }
   }
 
+  async function handleClaimHost() {
+    if (!game) return;
+    setActionError(null);
+    setClaimingHost(true);
+    try {
+      await claimHost(game.id);
+      // is_host flips on both the old and new host's players rows, and
+      // games.host_user_id updates too — all three arrive via the
+      // existing Realtime subscriptions, so every client's `isHost`
+      // re-derives itself automatically (see myPlayer above).
+    } catch (err) {
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't take over as host."
+      );
+    } finally {
+      setClaimingHost(false);
+    }
+  }
+
   async function handleAdvanceQuestion() {
     if (!game || !isHost) return;
     setActionError(null);
@@ -266,8 +322,24 @@ export default function GameRoom() {
     );
   }
 
+  // Phase 8: offered to any non-host player once the host's own
+  // `connected` flag reads false (see hostLooksStale above). Shown above
+  // whichever phase screen is currently rendering, rather than only in the
+  // lobby — a stuck host can happen at any point in the state machine
+  // (mid-COUNTDOWN with no one able to call begin_first_question,
+  // mid-LEADERBOARD with no one able to advance, etc.), not just WAITING.
+  const disconnectBanner =
+    hostLooksStale && !isHost ? (
+      <HostDisconnectedBanner onClaim={handleClaimHost} claiming={claimingHost} />
+    ) : null;
+
   if (game.status === "COUNTDOWN") {
-    return <CountdownOverlay onComplete={handleCountdownComplete} />;
+    return (
+      <>
+        {disconnectBanner}
+        <CountdownOverlay onComplete={handleCountdownComplete} />
+      </>
+    );
   }
 
   if (game.status === "QUESTION") {
@@ -279,11 +351,14 @@ export default function GameRoom() {
       );
     }
     return (
-      <QuestionScreen
-        question={question}
-        answeredIndex={answeredIndex}
-        onAnswer={handleAnswer}
-      />
+      <>
+        {disconnectBanner}
+        <QuestionScreen
+          question={question}
+          answeredIndex={answeredIndex}
+          onAnswer={handleAnswer}
+        />
+      </>
     );
   }
 
@@ -296,13 +371,16 @@ export default function GameRoom() {
       );
     }
     return (
-      <RevealScreen
-        question={question}
-        reveal={reveal}
-        isHost={isHost}
-        onContinue={handleContinueToLeaderboard}
-        advancing={advancing}
-      />
+      <>
+        {disconnectBanner}
+        <RevealScreen
+          question={question}
+          reveal={reveal}
+          isHost={isHost}
+          onContinue={handleContinueToLeaderboard}
+          advancing={advancing}
+        />
+      </>
     );
   }
 
@@ -316,14 +394,19 @@ export default function GameRoom() {
     }
     const isLastQuestion = game.current_question_index + 1 >= game.question_count;
     return (
-      <LeaderboardScreen
-        entries={leaderboard}
-        currentPlayerId={currentPlayerId}
-        isHost={isHost}
-        isLastQuestion={isLastQuestion}
-        onAdvance={handleAdvanceQuestion}
-        advancing={advancing}
-      />
+      <>
+        {disconnectBanner}
+        <LeaderboardScreen
+          entries={leaderboard}
+          currentPlayerId={currentPlayerId}
+          isHost={isHost}
+          isLastQuestion={isLastQuestion}
+          onAdvance={handleAdvanceQuestion}
+          advancing={advancing}
+          connectedCount={connectedCount}
+          totalCount={players.length}
+        />
+      </>
     );
   }
 
@@ -338,6 +421,7 @@ export default function GameRoom() {
   return (
     <div className="min-h-screen px-5 py-10 flex flex-col items-center">
       <div className="w-full max-w-lg flex flex-col gap-5">
+        {disconnectBanner}
         <div>
           <h1 className="text-3xl font-bold mb-1">Lobby</h1>
           <p className="text-sampaguita/60 text-sm">

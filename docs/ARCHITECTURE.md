@@ -18,7 +18,7 @@ today.
 | 5 | Question system + game engine | ✅ Done (partial question bank) |
 | 6 | Answer submission + scoring | ✅ Done |
 | 7 | Leaderboard + final results | ✅ Done |
-| 8 | Disconnect/reconnect handling | ⬜ Not started |
+| 8 | Disconnect/reconnect handling | ✅ Done |
 | 9 | Security + anti-cheat hardening | ⬜ Not started |
 | 10 | Mobile responsiveness + UI polish | ⬜ Not started |
 | 11 | Testing + bug fixing | ⬜ Not started |
@@ -500,3 +500,46 @@ LEADERBOARD` transition, advancing to the next question,
 Next up: **Phase 8 — disconnect/reconnect handling** (a host closing
 their tab mid-game currently leaves everyone else stuck with no way to
 advance the state machine; Phase 7 didn't add any new resilience here).
+
+## What's implemented today (Phase 8)
+
+- `supabase/migrations/0013_disconnect_reconnect.sql` — `heartbeat`,
+  `mark_stale_players`, `claim_host`. Detection is heartbeat/staleness-based
+  (20s threshold) rather than Realtime Presence — see the migration's
+  header comment for the full reasoning (short version: Presence can't be
+  exercised from this sandbox at all, same limitation as the rest of
+  Realtime since Phase 4; a heartbeat is a plain function call this
+  sandbox *can* fully validate, and it reuses the already-tested `players`
+  `postgres_changes` subscription to broadcast the result instead of
+  needing a new Realtime feature).
+- `src/lib/gameApi.ts` — `heartbeat`, `markStalePlayers`, `claimHost`
+  typed wrappers.
+- `src/hooks/useCurrentUserId.ts` (new) — also fixes a pre-existing gap:
+  `GameRoom`/`Results` used to know "who am I" only from
+  `location.state`, which doesn't survive a hard refresh or a directly-
+  opened `/game/:roomCode` link. Now derived by matching this browser's
+  persisted auth session against the already-fetched `players` roster.
+- `src/hooks/useHeartbeat.ts` (new) — every 8s, sends this player's own
+  heartbeat and opportunistically sweeps the roster for staleness. Runs
+  on *every* client, not just the host's — necessary since the host is
+  exactly the client that might be the one that's gone.
+- `GameRoom.tsx` — identity now derived via `useCurrentUserId` + roster
+  match (see above) rather than solely from router state; `useHeartbeat`
+  wired in; a new `HostDisconnectedBanner` (shown to non-host players
+  once the host's `connected` flag reads false) rendered above every
+  in-progress phase screen, not just the lobby.
+- `LeaderboardScreen` — optional "N of M connected" note, shown only when
+  someone's actually missing.
+- `Results.tsx` — same identity-derivation fix as `GameRoom.tsx`.
+
+**Known limitation, documented rather than silently left in:** detection
+has up to ~20s of lag (client A's heartbeat timer has to notice client
+B's absence), and relies on *some* other connected client's own timer
+running the sweep — if literally everyone disconnects simultaneously,
+nothing brings the game back on its own (would need a server-side
+scheduled job, e.g. `pg_cron`, deliberately not introduced this phase —
+see CHANGELOG's Phase 8 entry for why).
+
+Next up: **Phase 9 — security and anti-cheat hardening** (rate limiting on
+state-transition functions like `advance_question`/`claim_host`, and
+whatever else the phase turns up beyond what Phase 2/6 already built).

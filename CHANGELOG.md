@@ -442,3 +442,164 @@ scenarios as two simulated players plus a stranger:
 
 **Next phase:** Phase 8 — disconnect/reconnect handling.
 
+## Phase 8 — Disconnect/reconnect handling ✅
+
+**Completed:**
+- `supabase/migrations/0013_disconnect_reconnect.sql` — three new
+  `SECURITY DEFINER` functions:
+  - `heartbeat(game_id)` — any participant, called periodically by their
+    own client. Updates their own `players.connected = true` and
+    `last_seen_at = now()`.
+  - `mark_stale_players(game_id)` — any participant (not just the host —
+    the host might be the one who's gone). Sweeps the game's roster and
+    flips `connected = false` for anyone whose `last_seen_at` is more
+    than 20 seconds old. Idempotent, safe to call redundantly from every
+    client's own timer.
+  - `claim_host(game_id)` — any participant other than the current host.
+    Rejects with "The host is still connected" unless the host row is
+    both `connected = false` *and* stale by the same 20s threshold
+    (re-checked server-side, not trusted from the caller's possibly-stale
+    view). On success, deterministically reassigns hosting to the
+    earliest-joined currently-`connected` player (excluding the outgoing
+    host) — not necessarily the caller — and updates both that player's
+    `players.is_host` and `games.host_user_id` in the same transaction.
+  - **Mechanism choice, documented in the migration:** heartbeat +
+    staleness sweep instead of Supabase Realtime Presence, even though
+    `docs/ARCHITECTURE.md` flagged Presence as the more "natural" fit.
+    Presence is, like the rest of Realtime, a separate hosted service this
+    sandbox cannot exercise live-wire (see Phase 4's note) — a heartbeat
+    is a plain function + `UPDATE`, fully testable against the same
+    disposable local Postgres every other phase has used, and it
+    broadcasts through the *already-validated* `players` `postgres_changes`
+    subscription from Phase 4 rather than needing a new Realtime feature.
+    Trade-off: up to ~20s detection lag instead of Presence's near-instant
+    signal — acceptable against typical 5-120s question timers, but worth
+    revisiting once this can be checked against a live project.
+- `src/lib/gameApi.ts` — `heartbeat`, `markStalePlayers`, `claimHost`
+  typed wrappers, plus new `friendlyMessage` strings for the rejection
+  cases ("The host is still connected", "No other connected players are
+  available to become host", etc.).
+- `src/types/database.types.ts` — `Functions` map entries for all three
+  new RPCs.
+- `src/hooks/useCurrentUserId.ts` (new) — exposes the current browser's
+  persisted Supabase Auth user id. **Fixes a real, pre-existing gap, not
+  just new Phase 8 code:** `GameRoom.tsx`/`Results.tsx` previously derived
+  "who am I in this game" (`currentPlayerId`/`isHost`) *only* from React
+  Router's `location.state`, which is only populated when navigating in
+  from `CreateGame`/`JoinGame` — a hard refresh or opening a saved/shared
+  `/game/:roomCode` link directly left both `undefined`. Since
+  `players.user_id` is already client-readable for any participant (RLS,
+  Phase 2), matching it against the roster `useGameRealtime` already
+  fetches re-derives the same information without any new server code.
+  `location.state` is kept only as a same-render fallback for the brief
+  window before the roster's first fetch resolves.
+- `src/hooks/useHeartbeat.ts` (new) — sends `heartbeat()` +
+  `markStalePlayers()` together every 8 seconds (chosen so a real drop is
+  caught within ~2-3 missed beats, comfortably under the 20s server
+  threshold and the 5s minimum question timer) for as long as this
+  player's identity is known and the game hasn't reached `FINISHED`. Both
+  calls are fire-and-forget on transient failure — the next tick retries.
+- `GameRoom.tsx` — rewired `isHost`/`currentPlayerId` onto
+  `useCurrentUserId` + the live roster (see above); wired in
+  `useHeartbeat`; added `handleClaimHost`; added a `hostLooksStale` check
+  (`hostPlayer.connected === false`, reusing the exact column
+  `PlayerRoster` already dims on) that renders a new
+  `HostDisconnectedBanner` above **every** in-progress phase screen (not
+  just the lobby — a host can vanish mid-`COUNTDOWN`,
+  mid-`QUESTION`/`REVEAL`/`LEADERBOARD` just as easily, and each of those
+  has a host-only transition nothing else can trigger).
+- `src/components/game/HostDisconnectedBanner.tsx` (new) — shown to every
+  non-host player once the host looks stale; calls `claimHost`. Worded as
+  "let someone take over" rather than "become host" since the clicker
+  isn't guaranteed to be the one who ends up hosting (deterministic
+  earliest-joined-connected-player selection happens server-side).
+- `LeaderboardScreen` — new optional `connectedCount`/`totalCount` props
+  render a small "N of M players connected" note under the header
+  whenever someone's missing; omitted entirely when everyone's present.
+  Chosen as the one extra indicator beyond `PlayerRoster`'s existing dim
+  treatment (Phase 8 handoff item 4) because it's the natural
+  between-questions pause point — `QuestionScreen` stays as-is since
+  there's no good place to put a roster-wide status note without
+  distracting from the countdown/answering flow.
+- `Results.tsx` — same `useCurrentUserId` + roster-matching fix as
+  `GameRoom.tsx`, so "(you)" still highlights correctly after a hard
+  refresh of the final results page.
+
+**Validated by testing, not just review:**
+- Re-ran all 13 migrations (`0001`–`0013`) + the seed file end-to-end
+  against a fresh disposable local Postgres (same stubbed
+  `auth.users`/`auth.uid()` environment as every prior phase — this
+  session also hit the exact `nodesource.sources` apt-403 pitfall the
+  Phase 7 handoff warned about, moved out of
+  `/etc/apt/sources.list.d/`, `apt-get update` succeeded).
+- An 11-case scripted scenario as three simulated players plus a
+  stranger, covering: a normal heartbeat updating `connected`/
+  `last_seen_at`; a stranger rejected from both `heartbeat` and
+  `mark_stale_players`; `claim_host` rejected while the host is still
+  fresh; `mark_stale_players` correctly flipping a backdated host's
+  `connected` to `false`; `claim_host` deterministically promoting the
+  earliest-joined connected player (called *by* a different, later-joined
+  player, confirming the caller isn't automatically the new host); the
+  old host losing host-only privileges (`start_game` now rejected) and
+  the new host gaining them immediately after; `claim_host` rejected once
+  a game has reached `FINISHED`; `claim_host` rejected when no other
+  connected candidate exists (host stale, only other player also
+  disconnected); and a disconnected player's `connected` flag correctly
+  flipping back to `true` on their next `heartbeat` call (the "silent
+  rejoin on refresh" path — no `join_game` call required).
+- A full end-to-end scenario distinct from the unit-style tests above:
+  two players, host starts a 2-question game, gets the first question
+  live, then goes silent mid-`QUESTION` (no more heartbeats). The
+  surviving player's own heartbeat timer sweeps for staleness, sees the
+  host is gone, calls `claim_host`, and — now host — single-handedly
+  drives the rest of the game (`submit_answer` → `end_question` →
+  `advance_to_leaderboard` → `advance_question` twice) all the way to
+  `FINISHED` with correct final scores. The original host, reconnecting
+  afterward via a fresh `heartbeat` call, can still read the final
+  leaderboard as an ordinary (non-host) participant. **This is the
+  concrete failure mode Phase 7's handoff described — "everyone else is
+  stuck" — confirmed fixed, not just the individual functions in
+  isolation.**
+- A false-positive check: an actively-heartbeating host is never marked
+  stale by `mark_stale_players`, confirmed by heartbeating immediately
+  before the sweep and asserting `connected` stayed `true`.
+- A `WAITING`-phase check: a host who vanishes *before ever starting the
+  game* is still correctly detected as stale and replaced, and the new
+  host can then successfully call `start_game` — confirming Phase 8
+  isn't only wired up for mid-game drops.
+- `npm run build` (`tsc -b && vite build`) passes with zero errors.
+  `npm run lint` reports the same 110 pre-existing errors as a fresh,
+  unmodified extract of the pre-Phase-8 project (verified by running
+  lint against both side-by-side this session) — no new lint errors
+  from this phase's changes.
+
+**Not included in this phase (by design):**
+- Detection still has a real (~20s worst-case) lag rather than the
+  near-instant signal Realtime Presence could offer — see the mechanism
+  discussion above. Not revisited this phase since it can't be validated
+  from this sandbox either way.
+- No automated background sweeping independent of a live client —
+  `mark_stale_players` only runs when *some* connected client's own
+  heartbeat timer calls it. If every single participant's tab closes at
+  once, nobody's left to notice or to become host — an inherent limit of
+  a client-driven design without a server-side scheduled job (e.g.
+  `pg_cron`), which was deliberately not introduced given it's unusable
+  from this sandbox's testing setup and adds hosted-infra dependency
+  beyond what Phase 8 needs to solve the "stuck because the host left but
+  others are still around" case from Phase 7's handoff.
+- No UI test for the actual browser `beforeunload`/tab-close event —
+  reconnection relies entirely on the *absence* of further heartbeats
+  being noticed by others, not on any explicit "I'm leaving" signal from
+  the departing client. Simpler and more robust (works for crashes and
+  lost network too, not just clean tab closes) but means detection is
+  never faster than the 20s threshold even for a clean close.
+- `QuestionScreen` was deliberately left without its own connection
+  indicator (see `LeaderboardScreen` note above) — revisit only if
+  playtesting shows it's actually needed mid-question.
+- No anti-cheat hardening beyond what already exists (Phase 9) and no
+  mobile-specific polish pass on `HostDisconnectedBanner`/the leaderboard
+  connection note beyond reusing existing `Card`/`Button` primitives and
+  design tokens (Phase 10).
+
+**Next phase:** Phase 9 — security and anti-cheat hardening.
+

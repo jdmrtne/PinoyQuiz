@@ -257,6 +257,21 @@ export interface Database {
         Args: { p_game_id: string };
         Returns: undefined;
       };
+      heartbeat: {
+        Args: { p_game_id: string };
+        Returns: undefined;
+      };
+      mark_stale_players: {
+        Args: { p_game_id: string };
+        Returns: undefined;
+      };
+      claim_host: {
+        Args: { p_game_id: string };
+        Returns: {
+          out_new_host_player_id: string;
+          out_new_host_nickname: string;
+        }[];
+      };
     };
     Enums: {
       game_status: GameStatusRow;

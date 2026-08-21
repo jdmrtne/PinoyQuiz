@@ -36,6 +36,11 @@ function friendlyMessage(raw: string): string {
     "This game is not in the question phase",
     "This game is not in the reveal phase",
     "This game is not on the leaderboard screen",
+    "The host is still connected",
+    "You are already the host",
+    "No other connected players are available to become host",
+    "This game has already finished",
+    "This game has no host on record",
   ];
   const match = known.find((m) => raw.includes(m));
   return match ? raw : "Something went wrong. Please try again.";
@@ -245,6 +250,48 @@ export async function getLeaderboard(gameId: string): Promise<LeaderboardEntry[]
  */
 export async function advanceQuestion(gameId: string): Promise<void> {
   await callRpc("advance_question", { p_game_id: gameId });
+}
+
+/**
+ * Phase 8 — disconnect/reconnect handling. See
+ * supabase/migrations/0013_disconnect_reconnect.sql for the mechanism and
+ * why a heartbeat/staleness approach was chosen over Realtime Presence.
+ */
+
+/** Called periodically by every client to prove this player is still around. */
+export async function heartbeat(gameId: string): Promise<void> {
+  await callRpc("heartbeat", { p_game_id: gameId });
+}
+
+/**
+ * Called periodically by every client (not just the host's) — sweeps this
+ * game's roster and flips `connected=false` for anyone who's missed too
+ * many heartbeats. The resulting change reaches every client through the
+ * existing `players` Realtime subscription (Phase 4), same as any other
+ * roster update.
+ */
+export async function markStalePlayers(gameId: string): Promise<void> {
+  await callRpc("mark_stale_players", { p_game_id: gameId });
+}
+
+export interface ClaimHostResult {
+  newHostPlayerId: string;
+  newHostNickname: string;
+}
+
+/**
+ * Takes over as host once the current host has gone stale. Server-side
+ * picks the new host deterministically (earliest-joined connected player,
+ * excluding the stale host) — the caller doesn't have to be, and usually
+ * isn't, the player who ends up hosting. Rejected with a friendly message
+ * if the current host isn't actually stale yet.
+ */
+export async function claimHost(gameId: string): Promise<ClaimHostResult> {
+  const row = await callRpc("claim_host", { p_game_id: gameId });
+  return {
+    newHostPlayerId: row.out_new_host_player_id,
+    newHostNickname: row.out_new_host_nickname,
+  };
 }
 
 export interface JoinGameResult {

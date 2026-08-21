@@ -3,6 +3,7 @@ import { useParams, useLocation, Link } from "react-router-dom";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { useGameRealtime } from "../hooks/useGameRealtime";
+import { useCurrentUserId } from "../hooks/useCurrentUserId";
 import {
   getLeaderboard,
   GameApiError,
@@ -23,9 +24,15 @@ export default function Results() {
   const { roomCode } = useParams();
   const location = useLocation();
   const navState = location.state as { playerId?: string; isHost?: boolean } | null;
-  const currentPlayerId = navState?.playerId ?? null;
 
-  const { state, game } = useGameRealtime(roomCode);
+  const { state, game, players } = useGameRealtime(roomCode);
+  // Same reasoning as GameRoom.tsx (Phase 8): re-derive identity from the
+  // roster + this browser's persisted auth session rather than relying
+  // only on router state, so "(you)" still highlights correctly after a
+  // hard refresh of the results page.
+  const userId = useCurrentUserId();
+  const myPlayer = players.find((p) => p.user_id === userId) ?? null;
+  const currentPlayerId = myPlayer?.id ?? navState?.playerId ?? null;
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 

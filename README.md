@@ -5,7 +5,7 @@ culture, food, entertainment, sports, trivia, and slang — questions are
 Philippines-themed but written entirely in English. A host creates a room,
 friends join with a code or link, and everyone answers live, Kahoot-style.
 
-> **Status: Phase 7 complete** (leaderboard + final results). See
+> **Status: Phase 8 complete** (disconnect/reconnect handling). See
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full phase plan and
 > what's implemented vs. still pending.
 
@@ -137,21 +137,33 @@ Not yet available — lands in Phase 5+ alongside the game engine.
 Not yet documented — lands in Phase 12. Target is Vercel for the frontend
 (`npm run build` → `dist/`) with Supabase as the hosted backend.
 
-## Known limitations (through Phase 5)
+## Known limitations (through Phase 8)
 
 - Question bank has 80 of the eventual 240 questions — narrow settings
   (specific category + specific difficulty) can hit "not enough
   questions available"; Mixed difficulty or Random category work
-  comfortably (see "Seeding questions" above).
-- The game engine reaches the first question and stops there — no answer
-  submission, no scoring, no reveal, no leaderboard, no advancing past
-  question 1, no `FINISHED` state yet (Phase 6/7).
-- Answer buttons on the question screen are visibly present but disabled.
-- Realtime message delivery (roster sync, status changes) is wired up per
-  Phase 4 but hasn't been confirmed against a live project from this
-  environment — see Phase 4's note.
-- A removed player's own screen may not reliably show they were removed —
-  see `docs/ARCHITECTURE.md`.
+  comfortably (see "Seeding questions" above). Tracked separately as
+  Phase 14.
+- Realtime message delivery (roster sync, status changes, disconnect
+  flags) is wired up per Phase 4 but hasn't been confirmed against a
+  live Supabase project from this environment — everything downstream of
+  it (including all of Phase 8) has only been validated against a local
+  Postgres standing in for the database layer, not the live Realtime
+  wire. Two real browser tabs against a live project is the needed
+  manual check.
+- Disconnect detection (Phase 8) has up to ~20 seconds of lag and relies
+  on *some* other connected client's own heartbeat timer to notice — if
+  every participant disconnects at the same moment, nothing brings the
+  game back on its own without a server-side scheduled job, which this
+  phase deliberately didn't introduce. See `docs/ARCHITECTURE.md`'s
+  Phase 8 section and `supabase/migrations/0013_disconnect_reconnect.sql`
+  for the full reasoning.
+- A removed player's own screen may not reliably show they were removed
+  (Phase 4) — see `docs/ARCHITECTURE.md`.
+- No anti-cheat hardening beyond what's already in place (rate limiting
+  on state-transition calls, etc.) — Phase 9.
+- No mobile-specific polish pass beyond reusing existing responsive
+  primitives and design tokens — Phase 10.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the phase-by-phase plan
 and [CHANGELOG.md](CHANGELOG.md) for what's been completed so far.
