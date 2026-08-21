@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { computeRemainingSeconds } from "../game-engine/timeRemaining";
 
 /**
  * Computes remaining seconds from a server-set start timestamp, not from
@@ -6,6 +7,10 @@ import { useEffect, useState } from "react";
  * a correct (lower) remaining time rather than a full fresh countdown.
  * This is purely a *display* timer; actual answer-window enforcement is a
  * server-side concern that lands with submit_answer in Phase 6.
+ *
+ * The actual math lives in src/game-engine/timeRemaining.ts (Phase 11) so
+ * it can be unit tested directly; this hook is just that function plus the
+ * re-render tick.
  */
 export function useServerTimer(
   startedAtIso: string | null,
@@ -27,9 +32,5 @@ export function useServerTimer(
     return () => clearInterval(interval);
   }, [startedAtIso]);
 
-  if (!startedAtIso) return durationSeconds;
-
-  const startedAt = new Date(startedAtIso).getTime();
-  const elapsed = (Date.now() - startedAt) / 1000;
-  return Math.max(0, Math.ceil(durationSeconds - elapsed));
+  return computeRemainingSeconds(startedAtIso, durationSeconds);
 }

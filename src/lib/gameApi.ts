@@ -11,8 +11,12 @@ type FunctionName = keyof Database["public"]["Functions"];
 
 export class GameApiError extends Error {}
 
-/** Maps raw Postgres exception text (see 0007_room_functions.sql) to what we show the user. */
-function friendlyMessage(raw: string): string {
+/**
+ * Maps raw Postgres exception text (see 0007_room_functions.sql) to what we
+ * show the user. Exported (Phase 11) purely so it has a direct unit test —
+ * still only meant to be called from within this module.
+ */
+export function friendlyMessage(raw: string): string {
   const known = [
     "You must be signed in",
     "Nickname must be between 1 and 20 characters",

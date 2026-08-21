@@ -21,7 +21,7 @@ today.
 | 8 | Disconnect/reconnect handling | ✅ Done |
 | 9 | Security + anti-cheat hardening | ✅ Done |
 | 10 | Mobile responsiveness + UI polish | ✅ Done |
-| 11 | Testing + bug fixing | ⬜ Not started |
+| 11 | Testing + bug fixing | ✅ Done |
 | 12 | Production deployment | ⬜ Not started |
 
 Work happens one phase at a time. Do not start a phase's code until the
@@ -634,3 +634,58 @@ category of gap Phase 4/8's handoffs left for live Realtime wire
 behavior.
 
 Next up: **Phase 11 — testing + bug fixing**.
+
+## Phase 11 — testing + bug fixing (done)
+
+Two separate testing surfaces, because the actual game logic lives in two
+places rather than one:
+
+**Server-side (the real game engine) — `supabase/tests/run_scenarios.sql`.**
+A repeatable scripted scenario runner, replacing "run SQL by hand" (every
+prior phase's actual method). Truncates every app table at the top, so
+it's safe to re-run identically after any future migration; uses a
+`test_assert(condition, label)` helper that raises immediately on the
+first failed assertion. 8 scenarios / 27 assertions, chosen to be
+genuinely adversarial rather than re-confirming each phase's own already-
+tested happy path: a full 2-player game through `FINISHED`, a solo
+1-player game, an insufficient-questions rejection, the `QUESTION`/
+`end_question` race (a late `submit_answer` arriving after the host has
+already ended the question), rapid double-submission, the 20-character
+nickname boundary, `heartbeat` rate-limit enforcement, and host disconnect
+→ `claim_host` reassignment. Run against a disposable local Postgres per
+`docs/MASTER_HANDOFF.md`'s existing setup instructions (nothing about that
+setup changed this phase).
+
+**Client-side pure logic — Vitest (`vitest.config.ts`, `npm run test`).**
+No test runner existed before this phase. Scoped deliberately narrow:
+`environment: "node"`, no jsdom/React Testing Library, because the only
+genuinely pure client-side logic in this codebase (as opposed to thin
+components rendering server-validated data) turned out to be the
+countdown-remaining-time calculation. Extracted that out of
+`useServerTimer` into `src/game-engine/timeRemaining.ts` — a pure
+`computeRemainingSeconds(startedAtIso, durationSeconds, nowMs?)` function,
+zero behavior change for the hook's callers — finally giving the Phase-1-
+scaffolded `game-engine/` folder the "framework-agnostic, unit-testable
+without a DB" content its original description described. Also exported
+`gameApi.ts`'s previously-private `friendlyMessage` purely so it has a
+direct test. 18 tests total across `src/game-engine/timeRemaining.test.ts`,
+`src/lib/gameApi.test.ts`, and `src/data/gameOptions.test.ts` (the last one
+guards against a category/difficulty option ever silently missing its
+label — a real way this specific data-table pattern can break).
+
+**Bug-hunt result: zero real bugs found.** Every scenario above passed on
+the first run of `run_scenarios.sql`, confirming Phases 2–10's own
+per-phase testing discipline had already covered these paths correctly —
+this phase's value is a *repeatable* form of that confidence (re-runnable
+after any future change, not dependent on a session's scrollback) plus
+narrow real unit coverage on the one pocket of client-side pure logic that
+existed.
+
+Full test output, the exact `npm run lint`/`npm run build` verification
+(and why the total oxlint error count moved from 110 to 112 without any
+new `src/`-level errors — `vitest`'s own dependency tree now exists in
+`node_modules` and accounts for the difference), and what was deliberately
+left out of this phase's scope (component-render testing, concurrency
+fuzzing) are in `CHANGELOG.md`'s Phase 11 entry.
+
+Next up: **Phase 12 — production deployment**.

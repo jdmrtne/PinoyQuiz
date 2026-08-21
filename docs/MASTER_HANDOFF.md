@@ -6,13 +6,46 @@ technical design and per-phase implementation detail, see
 [docs/ARCHITECTURE.md](ARCHITECTURE.md); for a chronological log of every
 change and how it was tested, see [../CHANGELOG.md](../CHANGELOG.md).
 
-## Current state: Phase 10 complete ✅
+## Current state: Phase 11 complete ✅
 
-**Phases 1–10 are done and validated.** The game supports the entire core
+**Phases 1–11 are done and validated.** The game supports the entire core
 loop, survives players (including the host) dropping mid-game, every
-mutating server function is rate-limited against tight-loop abuse, and
-every screen now uses mobile-correct viewport sizing with real touch
-targets on the controls that need them.
+mutating server function is rate-limited against tight-loop abuse, every
+screen uses mobile-correct viewport sizing with real touch targets on the
+controls that need them, and — new this phase — the project finally has
+real automated, repeatable test coverage instead of relying entirely on
+by-hand SQL sessions and eyeballing.
+
+Phase 11 (testing + bug fixing) added:
+
+1. **`supabase/tests/run_scenarios.sql`** — a repeatable scripted scenario
+   runner for the server-side game engine (truncates all app tables at the
+   top, so re-running it after any future migration is always safe and
+   comparable). 8 scenarios / 27 assertions covering the real edge cases
+   that had never been adversarially tested before: a solo 1-player game,
+   the `QUESTION`/`end_question` race, rapid double-submission, the
+   20-character nickname boundary, an insufficient-questions rejection,
+   `heartbeat` rate-limit enforcement, and host disconnect →`claim_host`
+   reassignment, plus a full 2-player happy-path game through `FINISHED`.
+   **Run twice in this session — 27/27 pass both times. Zero real bugs
+   found**; every edge case was already handled correctly by Phases 2–10's
+   own functions.
+2. **Vitest** (`npm run test`, `vitest.config.ts`) — this project's first
+   client-side test runner. Scoped to the one pocket of genuinely pure,
+   framework-agnostic logic that exists client-side: the countdown-
+   remaining-time math, extracted out of `useServerTimer` into
+   `src/game-engine/timeRemaining.ts` (zero behavior change — the hook now
+   just calls it and owns the re-render tick). 18 tests total across that
+   file plus `src/lib/gameApi.test.ts` (the RPC error-message friendliness
+   mapping) and `src/data/gameOptions.test.ts` (category/difficulty label
+   table integrity). No jsdom/component-rendering tests — deliberately out
+   of scope; see CHANGELOG's Phase 11 entry for why.
+
+**Everything from Phase 8/9/10, unchanged this phase:** no SQL logic
+changed (the scenario runner only *reads* existing behavior — it added no
+migration), no `gameApi.ts` behavior changed (only `friendlyMessage`
+became exported, same implementation), no game-state-machine changes, no
+CSS/markup changes.
 
 Phase 10 (mobile responsiveness + UI polish) closed two concrete gaps
 found by reviewing every screen against small-viewport behavior, rather
@@ -74,9 +107,30 @@ changes.
 | 8 | Disconnect/reconnect handling | ✅ Done |
 | 9 | Security + anti-cheat hardening | ✅ Done |
 | 10 | Mobile responsiveness + UI polish | ✅ Done |
-| 11 | Testing + bug fixing | ⬜ **Next task** |
-| 12 | Production deployment | ⬜ Not started |
+| 11 | Testing + bug fixing | ✅ Done |
+| 12 | Production deployment | ⬜ **Next task** |
 | 14 | Expand question bank to 240 | ⬜ Not started (deferred from Phase 5) |
+
+## What Phase 11 actually built (so you don't re-derive it)
+
+- `supabase/tests/run_scenarios.sql` — run it against a disposable local
+  Postgres exactly as described in "How to test your work" below, then
+  `psql -d pinoyquiz_test -v ON_ERROR_STOP=1 -f supabase/tests/run_scenarios.sql`.
+  Safe to re-run anytime; it truncates `answers`, `game_questions`,
+  `players`, `games`, `rate_limit_hits`, and `auth.users` itself as its
+  first statement.
+- `vitest.config.ts`, `npm run test` script in `package.json`.
+- `src/game-engine/timeRemaining.ts` (+ `.test.ts`) — the countdown math,
+  extracted out of `src/hooks/useServerTimer.ts`, which now just imports
+  and calls it.
+- `src/lib/gameApi.ts` — `friendlyMessage` changed from module-private to
+  exported. No implementation change.
+- `src/lib/gameApi.test.ts`, `src/data/gameOptions.test.ts` — new test
+  files, no corresponding source changes (`gameOptions.ts` untouched).
+
+Full reasoning for what was and wasn't in scope, and the complete bug-hunt
+scenario list with results, is in `CHANGELOG.md`'s Phase 11 entry — read
+that instead of re-deriving the same test plan from scratch.
 
 ## What Phase 10 actually built (so you don't re-derive it)
 
@@ -124,54 +178,58 @@ Don't re-read these in full unless you're actually touching that code —
 this handoff doc's job is to tell you what already exists, not to make
 you re-derive it.
 
-## Next task: Phase 11 — testing + bug fixing
+## Next task: Phase 12 — production deployment
 
-`docs/ARCHITECTURE.md`'s roadmap table names this next; it has no
-Phase-11-specific detail beyond that roadmap line (the same situation
-Phase 9's handoff flagged for Phase 10 before that section got filled
-in this session) — search it yourself for "Phase 11" to confirm before
-assuming this list is complete.
+`docs/ARCHITECTURE.md`'s roadmap table names this next; as of this
+session it has no Phase-12-specific detail beyond that roadmap line
+(the same situation every prior phase's handoff flagged for the phase
+after it, before that section got filled in) — search it yourself for
+"Phase 12" to confirm before assuming this list is complete.
 
-**Concrete starting point, not assumed — this is the current real state
-of automated testing in this project:** `tests/` and `src/game-engine/`
-have existed as empty scaffolded folders since Phase 1 and are still
-empty today. Every phase so far has been validated by scripted SQL
-scenarios run by hand against a disposable local Postgres (see "How to
-test your work" below) and by `npm run build`/`npm run lint` — there is
-currently **zero automated, repeatable test suite** anywhere in this
-repo. That's very likely a real part of Phase 11's scope, not a gap to
-route around:
+Concrete things a real "production deployment" phase for this stack
+likely involves, not yet decided or built — treat this as a starting
+checklist to validate/expand, not a finished plan:
 
-1. **Decide what "testing" means for Phase 11 before writing code** —
-   this project has no test runner installed (no Vitest/Jest/Playwright
-   in `package.json`). Introducing one is a real decision (which
-   runner, unit vs. integration scope, whether SQL-level scenarios move
-   into a repeatable script vs. staying manual) worth making deliberately
-   rather than defaulting to whatever's first to hand — the existing
-   `src/game-engine/` folder was scaffolded back in Phase 1 specifically
-   for "framework-agnostic" logic that "can be unit tested without a DB"
-   (see its description in the Phase 1 CHANGELOG entry and
-   `ARCHITECTURE.md`'s project-structure section), which suggests unit
-   tests for pure logic were the original intent — but no pure game logic
-   currently lives outside the SQL functions themselves, so check whether
-   that's still the right shape before building around a stale plan.
-2. **Bug fixing** — this phase is also the place to chase down anything
-   real found during a fresh, deliberate bug-hunt pass (not the
-   "confirm this specific mechanism works" testing every prior phase did
-   for its own new code) — e.g. edge cases in existing flows that were
-   never adversarially tested: what happens with a 1-player game, a
-   0-second-remaining race between `submit_answer` and `end_question`,
-   rapid double-submission attempts beyond what Phase 9's rate limits
-   already guard against, a nickname that's exactly 20 characters (the
-   `maxLength`) combined with the longest category label, etc.
-3. Whatever else `docs/ARCHITECTURE.md`'s own Phase 11 notes call out, if
-   any exist by the time you read this.
+1. **Where it's actually hosted.** This is a Vite + React SPA with a
+   Supabase backend — a standard target for Vercel/Netlify/Cloudflare
+   Pages. No hosting decision has been made yet in this repo; confirm the
+   intended platform before assuming one, and check whether a project
+   already exists there or needs creating.
+2. **Environment variables in the hosting platform**, not just
+   `.env.local` — `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` need to
+   be set in whatever CI/deploy environment builds this, sourced from a
+   real (not local-test) Supabase project.
+3. **Every migration in `supabase/migrations/` (0001–0014) and the seed
+   file need to actually be applied against that real Supabase project**
+   — this session's testing was all against a disposable local Postgres,
+   never against a real hosted Supabase instance. That's a genuine,
+   still-open gap, not something Phase 11 closed.
+4. **Realtime, specifically** — `0008_realtime.sql` adds tables to the
+   `supabase_realtime` publication; confirm Realtime is actually enabled
+   for those tables in the real project's dashboard, not just at the SQL
+   level (this is the same category of "can't verify from this sandbox"
+   gap Phase 4/8's handoffs already flagged for live wire behavior).
+5. A production build sanity check (`npm run build`, verify `dist/`
+   output) is necessary but not sufficient — this app uses client-side
+   routing (`react-router-dom`), which needs an explicit SPA rewrite rule
+   on most static hosts (e.g. Vercel's `vercel.json` rewrites, Netlify's
+   `_redirects`), or deep links like `/game/:roomCode` will 404 on a hard
+   refresh. Confirm whichever host is chosen has this configured.
 
-Do **not** start Phase 12 (production deployment) early, and do not
-touch the question bank (Phase 14, deliberately deferred — see "Things
-to *not* redo" below).
+Do not touch the question bank (Phase 14, deliberately deferred — see
+"Things to *not* redo" below).
 
 ## How to test your work (do this — don't just review the SQL)
+
+**Since Phase 11:** once the environment below is set up and every
+migration + seed file applied, run
+`psql -d pinoyquiz_test -v ON_ERROR_STOP=1 -f supabase/tests/run_scenarios.sql`
+instead of writing new ad hoc `do $$ ... $$` blocks by hand for anything
+that script's 8 scenarios already cover. If your change affects behavior
+outside those scenarios, add a new scenario to that file (following its
+existing `test_assert(condition, label)` pattern) rather than testing it
+once in a throwaway session — that's the whole point of Phase 11 having
+made this repeatable.
 
 Every SQL-touching phase so far has been validated against a
 **disposable local Postgres**, not just read over. Reproduce that setup:
@@ -278,9 +336,23 @@ produces no CSS.
 - Don't re-litigate the rate limit numbers chosen in
   `0014_security_hardening.sql` without a concrete reason — they were
   deliberately set as generous multiples of real client cadence and
-  confirmed not to interfere with a full end-to-end game playthrough. If
-  Phase 11 or later changes any client polling/call pattern (e.g. adds
-  polling to a currently event-driven fetch), revisit the relevant limit
-  then, not preemptively.
-- Don't skip ahead to Phase 12 (production deployment) — Phase 11
-  (testing + bug fixing) is the immediate next task.
+  confirmed not to interfere with a full end-to-end game playthrough
+  (re-confirmed again in Phase 11's scenario 7). If a future phase
+  changes any client polling/call pattern (e.g. adds polling to a
+  currently event-driven fetch), revisit the relevant limit then, not
+  preemptively.
+- Don't re-run the Phase 11 bug-hunt from scratch expecting to find
+  something — it didn't, on a deliberately adversarial pass across 8
+  scenarios. If a future phase changes behavior in `submit_answer`,
+  `end_question`, `start_game`, or any other function
+  `run_scenarios.sql` exercises, extend that script with a new scenario
+  for the changed behavior rather than distrusting the whole file and
+  starting over.
+- Don't introduce jsdom/React Testing Library for component-render
+  tests without a concrete reason — Phase 11 deliberately scoped Vitest
+  to pure-logic-only (`environment: "node"`) because there was no pure
+  component logic worth isolating yet; see CHANGELOG's Phase 11 entry
+  for the reasoning if that calculus changes.
+- Don't skip ahead to Phase 14 (question bank expansion) instead of
+  Phase 12 (production deployment) — 12 is the immediate next task, per
+  the numbered sequence this project has followed since Phase 1.

@@ -5,10 +5,9 @@ culture, food, entertainment, sports, trivia, and slang — questions are
 Philippines-themed but written entirely in English. A host creates a room,
 friends join with a code or link, and everyone answers live, Kahoot-style.
 
-> **Status: Phase 10 complete** (mobile responsiveness + UI polish —
-> dynamic-viewport-height screens, iOS safe-area padding, and larger
-> touch targets on the answer buttons, option pills, and the host's
-> remove-player control). See
+> **Status: Phase 11 complete** (testing + bug fixing — a repeatable SQL
+> scenario runner for the server-side game engine plus a Vitest suite for
+> the client's pure logic; zero real bugs found in the bug-hunt pass). See
 > [docs/MASTER_HANDOFF.md](docs/MASTER_HANDOFF.md) for current state
 > and next steps, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for
 > the full phase plan.
@@ -32,9 +31,11 @@ src/
     lobby/           Lobby-specific components (Phase 4)
     host/            Host-only controls (Phase 4/5)
     game/            Question/reveal/leaderboard screens (Phase 5-7)
-  game-engine/       Server-authoritative game logic: scoring, question
-                     selection, state machine (Phase 5+, framework-agnostic
-                     so it can be unit tested without a DB)
+  game-engine/       Pure, framework-agnostic client-side logic that needs
+                     no DOM/DB to test (Phase 11: countdown-remaining-time
+                     math). Scoring/correctness/state-machine logic itself
+                     is server-side only — see supabase/migrations — by
+                     design, never duplicated client-side.
   lib/               Supabase client, API helpers (Phase 2+)
   hooks/             Realtime subscription hooks (Phase 4+)
   types/             Shared TypeScript contracts (game.ts implemented now)
@@ -43,9 +44,9 @@ src/
 supabase/
   migrations/        SQL schema migrations (Phase 2)
   seed/              Question seed scripts (Phase 2/14)
+  tests/             Repeatable SQL scenario runner (Phase 11)
 docs/
   ARCHITECTURE.md    Full technical architecture + phase roadmap
-tests/               Game logic unit tests (Phase 5+)
 ```
 
 ## Installation
@@ -134,14 +135,41 @@ For now, prefer **Mixed** difficulty or **Random** category when testing.
 
 ## Running tests
 
-Not yet available — lands in Phase 5+ alongside the game engine.
+Two separate test surfaces, matching where this project's logic actually
+lives:
+
+**Client-side pure logic (Vitest):**
+
+```bash
+npm run test
+```
+
+Covers `src/game-engine/timeRemaining.ts` (countdown math),
+`src/lib/gameApi.ts`'s error-message mapping, and `src/data/gameOptions.ts`'s
+label-table integrity. Deliberately doesn't render components (no jsdom) —
+see `docs/ARCHITECTURE.md`'s Phase 11 section for why.
+
+**Server-side game engine (repeatable SQL scenarios):** the actual game
+logic — scoring, correctness, state transitions, rate limiting — lives in
+the Postgres functions, so that's where the real test coverage is. After
+setting up a disposable local Postgres per `docs/MASTER_HANDOFF.md`'s
+"How to test your work" section (extensions + `auth.uid()` stub +
+`supabase_realtime` publication stub + all migrations + seed, in order):
+
+```bash
+psql -d pinoyquiz_test -v ON_ERROR_STOP=1 -f supabase/tests/run_scenarios.sql
+```
+
+Safe to re-run anytime — it truncates its own tables as its first
+statement. 8 scenarios / 27 assertions; each either prints `PASS: ...` or
+the whole script aborts loudly at the first failure.
 
 ## Production deployment
 
 Not yet documented — lands in Phase 12. Target is Vercel for the frontend
 (`npm run build` → `dist/`) with Supabase as the hosted backend.
 
-## Known limitations (through Phase 8)
+## Known limitations (through Phase 11)
 
 - Question bank has 80 of the eventual 240 questions — narrow settings
   (specific category + specific difficulty) can hit "not enough

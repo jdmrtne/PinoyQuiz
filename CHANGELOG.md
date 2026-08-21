@@ -898,3 +898,141 @@ not assumed):**
 
 **Next phase:** Phase 11 — testing + bug fixing.
 
+## Phase 11 — Testing + bug fixing ✅
+
+**Decision made first, per the Phase 10 handoff's instruction not to
+default to whatever's first to hand:** this project needed two distinct
+kinds of testing, not one, because the actual logic lives in two places —
+almost all of it server-side in the Postgres `SECURITY DEFINER` functions,
+plus a small amount of genuinely pure client-side logic. Re-checked
+`src/game-engine/`'s Phase 1 description ("framework-agnostic logic that
+can be unit tested without a DB") against what actually exists today: no
+pure game logic lived there — scoring, correctness, and timing are all
+computed in SQL (`submit_answer` in `0011_answer_submission.sql`) and
+deliberately never duplicated client-side (anti-cheat: the client is never
+trusted with timing). The one thing left that *was* pure, framework-agnostic
+display logic was the countdown-remaining-time calculation buried inside
+`useServerTimer`. So:
+
+1. **Server-side logic (the real game engine): a repeatable scripted
+   scenario runner**, not a one-off manual session. Added
+   `supabase/tests/run_scenarios.sql` — replaces "run scripted SQL
+   scenarios by hand" (every phase's actual method through Phase 10) with
+   a single idempotent script (truncates all app tables + `auth.users` at
+   the top, so re-running it is always safe and comparable) containing 8
+   scenarios / 27 assertions via a small `test_assert(condition, label)`
+   helper that raises loudly on the first failure. Re-run twice back to
+   back in this session to confirm the truncate-based idempotency actually
+   holds, not just assumed.
+2. **Client-side pure logic: introduced Vitest** (`vitest.config.ts`, `npm
+   run test`) — no test runner existed in `package.json` before this
+   phase. Deliberately `environment: "node"`, no jsdom/React Testing
+   Library: nothing in this codebase's *pure* logic needs a DOM, and
+   component-render testing was out of scope for what this phase actually
+   needed (see "Not included," below). Extracted the countdown math out of
+   `useServerTimer` into `src/game-engine/timeRemaining.ts` (`useServerTimer`
+   now just calls it and owns the re-render tick — zero behavior change),
+   finally giving that Phase-1-scaffolded-but-empty folder something to
+   hold. Also exported `friendlyMessage` from `gameApi.ts` (was
+   module-private) purely so it has a direct test. Three new test files,
+   18 tests total: `src/game-engine/timeRemaining.test.ts` (boundary/
+   rounding/clamping behavior, plus the exact slow-loading-client
+   regression case documented in `useServerTimer`'s own comments),
+   `src/lib/gameApi.test.ts` (every known error string round-trips
+   unmodified; unrecognized text falls back to the generic message),
+   `src/data/gameOptions.test.ts` (every category/difficulty option has
+   exactly one label, `random`/`mixed` — the two values `start_game`
+   treats as "no filter" — are always present, question-count/time-limit
+   option lists are non-empty and ascending).
+
+**Bug-hunt pass (adversarial, not "confirm this new code works" — the
+distinction the Phase 10 handoff drew).** Every scenario below was
+specifically chosen to probe an edge the "confirm this phase's own new
+code works" testing style of Phases 2–10 wouldn't have exercised on its
+own:
+
+- **1-player (solo) game.** `start_game`'s player-count check is `< 1`,
+  not `< 2` — a solo game creates, starts, and reaches `QUESTION`
+  correctly. No bug; confirms the existing check was already written for
+  this case, not merely happening to allow it.
+- **The `QUESTION`/`end_question` race.** A player's `submit_answer` that
+  arrives after the host has already called `end_question` (game already
+  flipped to `REVEAL`) is rejected with the friendly
+  "no longer accepting answers" message, and `end_question` had already
+  back-filled a zero-point "no answer" row for that player — so a
+  legitimately-late submission is rejected cleanly, not silently scored,
+  and the player isn't left as an unrecorded gap in that question's
+  answers. No bug.
+- **Rapid double-submission** (same player, same question, two
+  `submit_answer` calls back to back — a faster loop than Phase 9's rate
+  limit alone would need to catch, since this is the business-rule
+  "already answered" check underneath it). Second call rejected with the
+  friendly message; exactly one `answers` row exists afterward, not two.
+  No bug.
+- **Nickname length boundary.** Exactly 20 characters (the client
+  `TextField`'s `maxLength`) is accepted; 21 is rejected server-side with
+  the friendly message rather than silently truncated. No bug — but this
+  is worth having caught in a repeatable test rather than continuing to
+  rely on the client's `maxLength` alone never being bypassed.
+- **Insufficient questions for a narrow filter combination** (seed data
+  has only 2 `history`/`hard` questions; requested 5) — rejected with the
+  friendly "Not enough questions available" message, and the game stays in
+  `WAITING` rather than partially mutating state before failing. No bug.
+- **Rate limiting still active** (re-verified `heartbeat`'s 20-calls/30s
+  limit specifically, as a regression check against everything else this
+  phase touched, not because a break was expected). No bug.
+- **Host disconnect → `claim_host` reassignment**, exercised once more as
+  a straightforward regression check. No bug.
+
+**Net result: zero real bugs found.** Phases 2–10's own per-phase testing
+discipline had genuinely already covered these paths correctly; what this
+phase added is a *repeatable, re-runnable* form of that same confidence
+instead of one that only existed in a session's scrollback, plus real
+(if narrow) unit coverage on the client's one pocket of pure logic.
+
+**Validated by testing:**
+- `supabase/tests/run_scenarios.sql` run twice consecutively against a
+  fresh local Postgres (same one-time setup as every prior SQL-touching
+  phase — see `docs/MASTER_HANDOFF.md`'s "How to test your work"): 27/27
+  assertions pass both times.
+- `npm run test` (Vitest): 18/18 pass.
+- `npm run build` (`tsc -b && vite build`): zero errors.
+- `npm run lint` (oxlint): 112 total errors, but confirmed by filename
+  that all 112 are inside `node_modules` (mostly `typescript`,
+  `react-dom`, `react-router`'s own bundled output) — zero errors in
+  `src/`. The 2-error increase over the previously-documented 110
+  baseline is `vitest` and its transitive dependencies now existing in
+  `node_modules` at all, not anything in this project's own code; the
+  right number to track going forward is "errors under `src/`," which is
+  0, same as every prior phase.
+- `grep`'d the compiled `dist/assets/*.css` for `min-height:100dvh` (a
+  Phase 10 marker) post-build as a quick sanity check that this phase's
+  changes didn't disturb anything from Phase 10 — still present.
+
+**Also removed:** the empty `tests/` folder scaffolded in Phase 1. Its
+originally-intended role is now filled by two things instead: Vitest test
+files live co-located next to the source they test (`src/**/*.test.ts`,
+Vitest's own convention), and the SQL scenario runner lives in
+`supabase/tests/` (next to the migrations it exercises, not the frontend
+`src/` tree). An empty top-level folder with nothing pointing to it would
+just be confusing for the next session.
+
+**Not included in this phase, and why:**
+- **No component-level rendering tests** (React Testing Library, jsdom,
+  etc.). This codebase's UI components are thin renderers over data that's
+  already validated server-side (correctness, scoring, phase transitions)
+  — the case for testing them would be catching JSX/markup mistakes, which
+  `tsc -b` and the Phase 10 visual-review pass already cover for this
+  project's size. Revisit if the component layer grows real conditional
+  logic of its own worth unit-isolating.
+- **No load/concurrency testing** (e.g. many simulated concurrent
+  `submit_answer` calls racing against each other for the same question).
+  `0014_security_hardening.sql`'s `claim_host` fix already required
+  reasoning about one specific real race (documented there); a broader
+  concurrency-fuzzing pass is a reasonable thing for a future phase but
+  wasn't part of what this handoff's Phase 11 notes asked for.
+- Did not touch the question bank (Phase 14) or start Phase 12
+  (production deployment).
+
+**Next phase:** Phase 12 — production deployment.
+
