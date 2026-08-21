@@ -1,0 +1,87 @@
+@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap");
+
+/*
+  PINOY QUIZ — design tokens
+  Palette pulls from jeepney paint jobs and Manila dusk skies, not the
+  generic AI cream/terracotta or near-black/acid-green defaults.
+
+  Ink        #0E1329  — base background, "night sky over the bay"
+  Mango      #FFB100  — primary accent, warmth + energy
+  Ube        #7C4DDA  — secondary accent, festive
+  Sunset     #FF5D5D  — tertiary accent, urgency/incorrect
+  Sampaguita #F7F5EF  — near-white text/surfaces, the national flower
+  Bagoong    #16D19A  — success/correct green (teal-leaning, not generic green)
+*/
+@theme {
+  --color-ink: #0e1329;
+  --color-ink-2: #161d3d;
+  --color-ink-3: #202a52;
+  --color-mango: #ffb100;
+  --color-mango-dim: #cc8d00;
+  --color-ube: #7c4dda;
+  --color-ube-dim: #5c34a8;
+  --color-sunset: #ff5d5d;
+  --color-sampaguita: #f7f5ef;
+  --color-bagoong: #16d19a;
+
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+
+  --radius-card: 1.25rem;
+  --radius-pill: 999px;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-ink text-sampaguita font-body antialiased;
+    background-image:
+      radial-gradient(circle at 12% 8%, rgba(124, 77, 218, 0.25), transparent 40%),
+      radial-gradient(circle at 88% 4%, rgba(255, 177, 0, 0.18), transparent 38%);
+    background-attachment: fixed;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+  :focus-visible {
+    outline: 3px solid var(--color-mango);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+}
+
+@layer utilities {
+  /* Signature element: diagonal jeepney stripe band, used sparingly */
+  .jeepney-stripes {
+    background: repeating-linear-gradient(
+      -18deg,
+      var(--color-mango) 0px,
+      var(--color-mango) 26px,
+      var(--color-ube) 26px,
+      var(--color-ube) 52px,
+      var(--color-sunset) 52px,
+      var(--color-sunset) 78px,
+      var(--color-bagoong) 78px,
+      var(--color-bagoong) 104px
+    );
+  }
+
+  .text-gradient-mango {
+    background: linear-gradient(90deg, var(--color-mango), var(--color-sunset));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

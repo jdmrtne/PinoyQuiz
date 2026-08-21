@@ -1,0 +1,379 @@
+import { useEffect, useRef, useState } from "react";
+import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
+import { Card } from "../components/ui/Card";
+import { Button } from "../components/ui/Button";
+import { InviteBox } from "../components/lobby/InviteBox";
+import { PlayerRoster } from "../components/lobby/PlayerRoster";
+import { CountdownOverlay } from "../components/game/CountdownOverlay";
+import { QuestionScreen } from "../components/game/QuestionScreen";
+import { RevealScreen } from "../components/game/RevealScreen";
+import { LeaderboardScreen } from "../components/game/LeaderboardScreen";
+import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "../data/gameOptions";
+import { useGameRealtime } from "../hooks/useGameRealtime";
+import { useServerTimer } from "../hooks/useServerTimer";
+import {
+  removePlayer,
+  startGame,
+  beginFirstQuestion,
+  getCurrentQuestion,
+  submitAnswer,
+  endQuestion,
+  getAnswerReveal,
+  advanceToLeaderboard,
+  getLeaderboard,
+  advanceQuestion,
+  GameApiError,
+  type CurrentQuestion,
+  type AnswerReveal,
+  type LeaderboardEntry,
+} from "../lib/gameApi";
+
+export default function GameRoom() {
+  const { roomCode } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const navState = location.state as { playerId?: string; isHost?: boolean } | null;
+  const { state, game, players } = useGameRealtime(roomCode);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [question, setQuestion] = useState<CurrentQuestion | null>(null);
+  const [answeredIndex, setAnsweredIndex] = useState<number | null>(null);
+  const [reveal, setReveal] = useState<AnswerReveal | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
+  const [advancing, setAdvancing] = useState(false);
+  const endQuestionCalledRef = useRef<string | null>(null);
+
+  const isHost = navState?.isHost ?? false;
+  const currentPlayerId = navState?.playerId ?? null;
+
+  // Fetch the live question whenever the game enters QUESTION state (or the
+  // current question changes — i.e. advancing to a future question in
+  // Phase 7 will re-trigger this the same way).
+  useEffect(() => {
+    // REVEAL still needs the question (RevealScreen renders it alongside the
+    // reveal payload below), so only clear `question` once we've left both
+    // phases entirely — clearing it on REVEAL too would leave RevealScreen
+    // permanently stuck behind the "Loading results…" branch, since that
+    // branch waits on `question` as well as `reveal`.
+    if (!game || (game.status !== "QUESTION" && game.status !== "REVEAL")) {
+      setQuestion(null);
+      return;
+    }
+    // Already-loaded question carries over into REVEAL as-is; only QUESTION
+    // triggers a (re)fetch.
+    if (game.status !== "QUESTION") return;
+    let cancelled = false;
+    getCurrentQuestion(game.id)
+      .then((q) => {
+        if (!cancelled) setQuestion(q);
+      })
+      .catch(() => {
+        if (!cancelled) setQuestion(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [game?.status, game?.current_question_id, game?.id]);
+
+  // A fresh question means a fresh answer + fresh countdown-to-end_question
+  // guard. Keyed on the question's own id, not just game.status, so this
+  // still resets correctly once Phase 7 starts reusing the QUESTION status
+  // for a second/third question.
+  useEffect(() => {
+    setAnsweredIndex(null);
+  }, [question?.questionId]);
+
+  // Fetch the reveal payload whenever the game enters REVEAL state.
+  useEffect(() => {
+    if (!game || game.status !== "REVEAL") {
+      setReveal(null);
+      return;
+    }
+    let cancelled = false;
+    getAnswerReveal(game.id)
+      .then((r) => {
+        if (!cancelled) setReveal(r);
+      })
+      .catch(() => {
+        if (!cancelled) setReveal(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [game?.status, game?.current_question_id, game?.id]);
+
+  // Fetch standings whenever the game enters LEADERBOARD state. Re-keyed on
+  // current_question_index too, so a second/third trip through LEADERBOARD
+  // (after the next question's reveal) re-fetches rather than showing the
+  // previous question's scoreDelta.
+  useEffect(() => {
+    if (!game || game.status !== "LEADERBOARD") {
+      setLeaderboard(null);
+      return;
+    }
+    let cancelled = false;
+    getLeaderboard(game.id)
+      .then((rows) => {
+        if (!cancelled) setLeaderboard(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setLeaderboard(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [game?.status, game?.current_question_index, game?.id]);
+
+  // Once the game finishes, every client routes to the final results page —
+  // status arrives via Realtime for everyone, so this fires for the host
+  // and every other player at the same time.
+  useEffect(() => {
+    if (!game || game.status !== "FINISHED" || !roomCode) return;
+    navigate(`/results/${roomCode}`, {
+      replace: true,
+      state: { playerId: currentPlayerId, isHost },
+    });
+  }, [game?.status, roomCode, navigate, currentPlayerId, isHost]);
+
+  // Host-only: once the display timer hits zero, end the question for
+  // everyone. This is purely a client-triggered transition (the server
+  // doesn't police the clock itself — see 0011_answer_submission.sql) so
+  // only the host's client does it, guarded so it fires once per question
+  // even though this timer re-renders every 250ms.
+  const remaining = useServerTimer(
+    question?.questionStartedAt ?? null,
+    question?.timeLimitSeconds ?? 0
+  );
+  useEffect(() => {
+    if (!isHost || !game || game.status !== "QUESTION" || !question) return;
+    if (remaining > 0) return;
+    if (endQuestionCalledRef.current === question.questionId) return;
+    endQuestionCalledRef.current = question.questionId;
+    endQuestion(game.id).catch((err) => {
+      // Reset the guard so a transient failure can be retried on the next tick.
+      endQuestionCalledRef.current = null;
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't end the question."
+      );
+    });
+  }, [isHost, game, question, remaining]);
+
+  async function handleStart() {
+    if (!game) return;
+    setActionError(null);
+    setStarting(true);
+    try {
+      await startGame(game.id);
+      // status -> COUNTDOWN arrives via Realtime for every client, including
+      // this one — no local state mutation needed.
+    } catch (err) {
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't start the game."
+      );
+      setStarting(false);
+    }
+  }
+
+  async function handleCountdownComplete() {
+    if (!game || !isHost) return;
+    try {
+      await beginFirstQuestion(game.id);
+    } catch (err) {
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't begin the question."
+      );
+    }
+  }
+
+  async function handleAnswer(index: number) {
+    if (!game || answeredIndex !== null) return;
+    setActionError(null);
+    setAnsweredIndex(index); // optimistic — locks the UI immediately
+    try {
+      await submitAnswer(game.id, index);
+    } catch (err) {
+      setAnsweredIndex(null); // let them try again (e.g. transient network error)
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't submit your answer."
+      );
+    }
+  }
+
+  async function handleRemove(playerId: string) {
+    setActionError(null);
+    try {
+      await removePlayer(playerId);
+    } catch (err) {
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't remove that player."
+      );
+    }
+  }
+
+  async function handleContinueToLeaderboard() {
+    if (!game || !isHost) return;
+    setActionError(null);
+    setAdvancing(true);
+    try {
+      await advanceToLeaderboard(game.id);
+      // status -> LEADERBOARD arrives via Realtime for everyone.
+    } catch (err) {
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't show the leaderboard."
+      );
+    } finally {
+      setAdvancing(false);
+    }
+  }
+
+  async function handleAdvanceQuestion() {
+    if (!game || !isHost) return;
+    setActionError(null);
+    setAdvancing(true);
+    try {
+      await advanceQuestion(game.id);
+      // status -> QUESTION or FINISHED arrives via Realtime for everyone.
+    } catch (err) {
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't advance the game."
+      );
+    } finally {
+      setAdvancing(false);
+    }
+  }
+
+  if (state.status === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-sampaguita/50">Loading room…</p>
+      </div>
+    );
+  }
+
+  if (state.status === "error" || !game) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-5">
+        <Card className="p-8 max-w-md text-center">
+          <h1 className="text-xl font-bold mb-2">Room not found</h1>
+          <p className="text-sampaguita/60 text-sm mb-6">
+            {state.status === "error" ? state.message : "Something went wrong."}
+          </p>
+          <Link to="/join">
+            <Button variant="secondary">Try another code</Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
+  if (game.status === "COUNTDOWN") {
+    return <CountdownOverlay onComplete={handleCountdownComplete} />;
+  }
+
+  if (game.status === "QUESTION") {
+    if (!question) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <p className="text-sampaguita/50">Loading question…</p>
+        </div>
+      );
+    }
+    return (
+      <QuestionScreen
+        question={question}
+        answeredIndex={answeredIndex}
+        onAnswer={handleAnswer}
+      />
+    );
+  }
+
+  if (game.status === "REVEAL") {
+    if (!question || !reveal) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <p className="text-sampaguita/50">Loading results…</p>
+        </div>
+      );
+    }
+    return (
+      <RevealScreen
+        question={question}
+        reveal={reveal}
+        isHost={isHost}
+        onContinue={handleContinueToLeaderboard}
+        advancing={advancing}
+      />
+    );
+  }
+
+  if (game.status === "LEADERBOARD") {
+    if (!leaderboard) {
+      return (
+        <div className="min-h-screen flex items-center justify-center">
+          <p className="text-sampaguita/50">Loading leaderboard…</p>
+        </div>
+      );
+    }
+    const isLastQuestion = game.current_question_index + 1 >= game.question_count;
+    return (
+      <LeaderboardScreen
+        entries={leaderboard}
+        currentPlayerId={currentPlayerId}
+        isHost={isHost}
+        isLastQuestion={isLastQuestion}
+        onAdvance={handleAdvanceQuestion}
+        advancing={advancing}
+      />
+    );
+  }
+
+  // WAITING (and any other not-yet-built status) falls back to the lobby.
+  const rosterPlayers = players.map((p) => ({
+    id: p.id,
+    nickname: p.nickname,
+    isHost: p.is_host,
+    connected: p.connected,
+  }));
+
+  return (
+    <div className="min-h-screen px-5 py-10 flex flex-col items-center">
+      <div className="w-full max-w-lg flex flex-col gap-5">
+        <div>
+          <h1 className="text-3xl font-bold mb-1">Lobby</h1>
+          <p className="text-sampaguita/60 text-sm">
+            {CATEGORY_LABELS[game.category]} · {DIFFICULTY_LABELS[game.difficulty]} ·{" "}
+            {game.question_count} questions · {game.time_limit_seconds}s per question
+          </p>
+        </div>
+
+        <InviteBox roomCode={roomCode!} />
+
+        <PlayerRoster
+          players={rosterPlayers}
+          currentPlayerId={currentPlayerId}
+          onRemove={isHost ? handleRemove : undefined}
+        />
+        {actionError && (
+          <p role="alert" className="text-sm text-sunset -mt-2">
+            {actionError}
+          </p>
+        )}
+
+        {isHost ? (
+          <Button size="lg" onClick={handleStart} disabled={starting}>
+            {starting ? "Starting…" : "Start Game"}
+          </Button>
+        ) : (
+          <Card className="p-4 text-center text-sm text-sampaguita/60">
+            Waiting for the host to start the game…
+          </Card>
+        )}
+
+        <p className="text-xs text-center text-sampaguita/30">
+          Players joining, leaving, or reconnecting update live here via
+          Supabase Realtime — no refresh needed.
+        </p>
+      </div>
+    </div>
+  );
+}
