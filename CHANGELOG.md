@@ -603,3 +603,176 @@ scenarios as two simulated players plus a stranger:
 
 **Next phase:** Phase 9 — security and anti-cheat hardening.
 
+## Phase 9 — Security and anti-cheat hardening ✅
+
+**Scope, per `docs/MASTER_HANDOFF.md`'s Phase 9 section and
+`docs/ARCHITECTURE.md`'s Security model:** rate limiting on every
+mutating function (the concrete gap the handoff called out, and the
+"Still to come (Phase 9)" item ARCHITECTURE.md's Security model section
+named for `lookup_game_by_room_code` specifically), a closer look at
+`claim_host` for any subtler race than "healthy host can't be forced
+out," and a check of what else `submit_answer`'s server-side timing
+already closes. Deliberately did **not** touch the question bank (Phase
+14) or start Phase 10's mobile polish.
+
+**What was actually a gap vs. what wasn't (the determination the handoff
+asked for, not assumed):**
+- **Rate limiting was a real gap.** Every function's own correctness
+  checks (right phase, right caller, uniqueness constraints) were never
+  in question — those already stop a bad client from corrupting *another*
+  player's game state. What was missing was anything stopping a client
+  from calling a function it's otherwise allowed to call as fast as a
+  tight loop can issue requests: hammering `heartbeat`/`mark_stale_players`
+  far faster than the real 8s client interval, or spamming
+  `lookup_game_by_room_code` to brute-force room codes — exactly the
+  "Still to come" item ARCHITECTURE.md's Security model section had
+  flagged against that function since Phase 3 and never actually
+  implemented. This is a resource-protection/enumeration-resistance gap,
+  not a data-integrity hole, but real enough to close.
+- **`claim_host`'s race was real, just not the one already guarded
+  against.** The existing "host must actually be stale" check (added in
+  Phase 8) already stops a healthy host from being forced out by someone
+  else's inaction. What it didn't stop: a genuine TOCTOU race where
+  `claim_host` reads the host row as stale, then — before its own
+  `update` lands — the real host's own `heartbeat` call updates
+  `last_seen_at` concurrently. Two racing transactions could each read
+  "stale" before either writes, and the host gets demoted a moment after
+  proving they're still connected. Confirmed by direct testing (see
+  below), not just code review.
+- **`submit_answer`'s timing anti-cheat needed no further work.**
+  Re-confirmed by reading the Phase 6 implementation directly:
+  `response_time_ms` is already computed entirely server-side from
+  `now() - games.question_started_at`, never from any client-supplied
+  value, and correctness is computed by mapping the player's selected
+  *displayed* slot back through `game_questions.shuffle_map` to the real
+  answer — a client can't claim a faster response or a different answer
+  than it actually submitted. Nothing to add here; Phase 9 only added the
+  same rate limit every other mutating function got, as defense in
+  depth against submission-spam, not because the scoring math itself was
+  exploitable.
+
+**What was built (`supabase/migrations/0014_security_hardening.sql`):**
+- `rate_limit_hits` table — one row per `(user_id, action)`, sliding
+  window (`window_start`, `call_count`). RLS enabled with zero policies
+  plus an explicit `revoke all ... from anon, authenticated`, matching
+  every other table's defense-in-depth pattern from 0005/0006 — the only
+  intended access path is the SECURITY DEFINER function below anyway,
+  which bypasses RLS as table owner regardless.
+- `enforce_rate_limit(p_action, p_max_calls, p_window_seconds)` —
+  internal helper, single upsert (increments in place, or resets to a
+  fresh window if the old one expired), raises once the count exceeds the
+  limit. Deliberately **not** granted `EXECUTE` to `authenticated` — same
+  revoked-from-public-but-called-internally pattern
+  `generate_room_code()` already established in
+  `0007_room_functions.sql`, confirmed with `has_function_privilege()`
+  during testing (see below) that neither `anon` nor `authenticated` can
+  call it directly.
+- Every mutating function got a `perform enforce_rate_limit(...)` call
+  right after its existing "must be signed in" check, each `create or
+  replace`d with its original body from its own migration otherwise
+  unchanged (grants aren't touched since signatures didn't change):
+  `create_game` (10/60s), `lookup_game_by_room_code` (20/60s — the
+  enumeration-resistance one specifically), `join_game` (15/60s),
+  `remove_player` (30/60s), `start_game` (10/30s), `begin_first_question`
+  (10/10s), `submit_answer` (15/10s), `end_question` (10/10s),
+  `advance_to_leaderboard` (10/10s), `advance_question` (10/10s),
+  `heartbeat` (20/30s), `mark_stale_players` (20/30s), `claim_host`
+  (8/30s). Every limit is a generous multiple of that action's real
+  client cadence (`useHeartbeat.ts`'s 8s interval; everything else in
+  `GameRoom.tsx` is event-driven off Realtime, not polled — see
+  `docs/MASTER_HANDOFF.md`'s "How to test your work" section reasoning
+  reused here) so no legitimate client can ever hit one.
+  `lookup_game_by_room_code` also lost its `stable` qualifier — it's no
+  longer side-effect-free now that it calls a function that writes, and
+  Postgres would reject a volatile-underneath function still marked
+  `stable`.
+- `claim_host` — same rate limit as above, plus the actual race fix:
+  the host row is now read with `select ... for update` instead of a
+  plain `select ... into`, so a concurrent `heartbeat()` UPDATE against
+  that same row (issued by the real host reconnecting at the same
+  instant) serializes against this transaction instead of racing it —
+  whichever commits first is what the other sees.
+- `src/lib/gameApi.ts` — added `"You are doing that too fast"` to
+  `friendlyMessage`'s known-message list so a rate-limited call surfaces
+  a clean UI message instead of falling through to the generic
+  "Something went wrong" fallback. No other frontend changes — every
+  rate limit is set far enough above real usage that normal play was
+  confirmed unaffected (see testing below), so no UI-visible retry/backoff
+  logic was needed for this phase.
+
+**Validated by testing, not just review** (fresh disposable local
+Postgres, same stubbed `auth.users`/`auth.uid()` environment as every
+prior phase — hit the same `nodesource.sources` apt-403 pitfall the
+handoff warned about again this session, same fix):
+- Ran all 14 migrations (`0001`–`0014`) + the seed file end-to-end twice
+  against two independent fresh databases (once while iterating, once
+  again from a completely clean database as a final check) — zero errors
+  either time.
+- A 7-case scripted scenario: 25 rapid-fire `heartbeat` calls correctly
+  rejected once the 20/30s budget is exceeded; 10 calls at realistic
+  volume all succeed; 25 rapid `lookup_game_by_room_code` calls correctly
+  rejected (the enumeration-resistance case); a call succeeds again once
+  its window is manually rolled back over 60s (confirms the reset branch,
+  not just the reject branch); one user's spam doesn't block a different
+  user's legitimate call (confirms the per-`user_id` keying, not a global
+  counter); a single `submit_answer` call during normal play succeeds
+  under its new limit; `claim_host` still correctly promotes the
+  earliest-joined connected player after the rate-limit and `for update`
+  changes.
+- A separate full 3-question, 2-player game played end-to-end through
+  every mutating function (`create_game` → `join_game` → `start_game` →
+  `begin_first_question` → per-question `heartbeat`/`mark_stale_players`/
+  `submit_answer`/`end_question`/`advance_to_leaderboard`/
+  `get_leaderboard`/`advance_question` ×3) reached `FINISHED` with
+  correct scores and never once tripped a rate limit — confirms the
+  chosen limits don't interfere with legitimate play, not just that they
+  block abuse.
+- Directly confirmed `enforce_rate_limit` isn't callable by either
+  client role: `has_function_privilege('authenticated', ...)` and
+  `has_function_privilege('anon', ...)` both return `false`.
+- **The `claim_host` race fix specifically:** rather than trust the "for
+  update serializes concurrent access" reasoning by inspection alone, ran
+  an actual two-session concurrency test — session A opens an explicit
+  transaction, takes `select ... for update` on the host's player row,
+  and holds it via `pg_sleep(3)` before committing; session B, started
+  ~0.7s later, issues a plain `update players set last_seen_at = now()
+  where id = <that row>` (the same statement shape `heartbeat()` runs)
+  against the *same row*. Session B's `UPDATE` measured ~2.36s to
+  complete — it genuinely blocked until session A's transaction
+  committed, rather than running immediately, confirming the lock (and
+  therefore the fix) actually serializes concurrent `claim_host`/
+  `heartbeat` access on the host row rather than just looking correct on
+  paper.
+- `npm run build` (`tsc -b && vite build`) passes with zero errors.
+  `npm run lint` reports the same 110 pre-existing errors as the
+  documented baseline — this phase's only `.ts` change is the one-line
+  `friendlyMessage` addition in `gameApi.ts`, no new lint errors.
+
+**Not included in this phase (by design):**
+- No rate limiting on pure `stable` read functions other than
+  `lookup_game_by_room_code` (`get_current_question`, `get_answer_reveal`,
+  `get_leaderboard`) — these are event-driven off Realtime state changes
+  in the current UI (confirmed by reading `GameRoom.tsx`: each is called
+  from a `useEffect` keyed on `game.status`/`game.current_question_id`,
+  never polled), so they don't carry the same brute-force/enumeration
+  concern `lookup_game_by_room_code` does as the one function reachable
+  *before* a player has joined a game at all. Revisit if a future phase
+  adds any client-side polling of these.
+- No CAPTCHA, IP-based limiting, or anything below the `auth.uid()` layer
+  — out of scope for a Supabase-only stack without a separate application
+  server, and the anonymous-auth session itself is already the identity
+  boundary every other security decision in this app (Phase 2 onward) is
+  built on.
+- Rate-limit windows are fixed constants baked into each `perform
+  enforce_rate_limit(...)` call rather than pulled from a config table —
+  matches this project's existing `games.scoring_config`-is-configurable
+  vs. `STALE_SECONDS`-is-a-constant split (Phase 8 made the latter choice
+  for the same reason: nothing in this app's spec calls for these to be
+  tunable per-game, so a table would be unused flexibility).
+- `rate_limit_hits` rows are never pruned — bounded by
+  `(real users) × (13 actions)`, not by call volume, since it's an
+  upsert-in-place counter, not an append-only log, so no cleanup job was
+  needed to keep it from growing unboundedly.
+
+**Next phase:** Phase 10 — mobile responsiveness + UI polish.
+

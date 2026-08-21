@@ -41,6 +41,7 @@ function friendlyMessage(raw: string): string {
     "No other connected players are available to become host",
     "This game has already finished",
     "This game has no host on record",
+    "You are doing that too fast",
   ];
   const match = known.find((m) => raw.includes(m));
   return match ? raw : "Something went wrong. Please try again.";

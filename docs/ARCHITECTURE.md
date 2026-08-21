@@ -19,7 +19,7 @@ today.
 | 6 | Answer submission + scoring | ✅ Done |
 | 7 | Leaderboard + final results | ✅ Done |
 | 8 | Disconnect/reconnect handling | ✅ Done |
-| 9 | Security + anti-cheat hardening | ⬜ Not started |
+| 9 | Security + anti-cheat hardening | ✅ Done |
 | 10 | Mobile responsiveness + UI polish | ⬜ Not started |
 | 11 | Testing + bug fixing | ⬜ Not started |
 | 12 | Production deployment | ⬜ Not started |
@@ -407,10 +407,19 @@ Supabase) as part of Phase 2, followed by a scripted test as the
 testing caught a real bug — see `CHANGELOG.md` — before it could ever
 reach a live project.
 
-Still to come (Phase 9): rate limiting / submission-timing validation once
-the `submit_answer` function exists, and a narrow room-code-lookup
-function for the pre-join screen that returns only `{exists, status,
-room_code}` rather than a full game row.
+**Phase 9 update:** both items above are now done. The narrow
+room-code-lookup function (`lookup_game_by_room_code`) actually shipped
+back in Phase 3, returning only `{found, status, category, difficulty,
+question_count, time_limit_seconds}` — no `id`, no `host_user_id`.
+Submission-timing validation was already server-side as of Phase 6
+(`response_time_ms` computed from `question_started_at`, never a
+client-reported value). What Phase 9 actually added was rate limiting —
+`enforce_rate_limit()` in `supabase/migrations/0014_security_hardening.sql`,
+applied to every mutating function plus `lookup_game_by_room_code`
+itself (closing the room-code enumeration/brute-force angle that
+function's narrow return shape alone didn't address) — plus a `claim_host`
+TOCTOU race fix. See `docs/MASTER_HANDOFF.md` and `CHANGELOG.md`'s Phase 9
+entry for full detail.
 
 ## What's implemented today (Phase 1)
 
@@ -540,6 +549,24 @@ nothing brings the game back on its own (would need a server-side
 scheduled job, e.g. `pg_cron`, deliberately not introduced this phase —
 see CHANGELOG's Phase 8 entry for why).
 
-Next up: **Phase 9 — security and anti-cheat hardening** (rate limiting on
-state-transition functions like `advance_question`/`claim_host`, and
-whatever else the phase turns up beyond what Phase 2/6 already built).
+## What's implemented today (Phase 9)
+
+- `supabase/migrations/0014_security_hardening.sql` — `rate_limit_hits`
+  table + `enforce_rate_limit()` helper (internal-only, not grantable to
+  clients), applied to all 13 mutating/enumeration-sensitive functions.
+  Limits are generous multiples of real client cadence, confirmed by a
+  full end-to-end game playthrough not to interfere with legitimate play.
+- `claim_host`'s TOCTOU race (host read as stale, then a concurrent
+  `heartbeat()` from the real host lands before the write) fixed via
+  `select ... for update` on the host row, verified with an actual
+  two-session concurrency test.
+- `submit_answer`'s existing server-side timing/scoring (Phase 6)
+  re-confirmed to need no changes.
+- `src/lib/gameApi.ts` — one new known-message entry in `friendlyMessage`
+  for rate-limit rejections.
+
+See `docs/MASTER_HANDOFF.md` and `CHANGELOG.md`'s Phase 9 entry for full
+detail, including the specific per-function limits chosen and the testing
+methodology.
+
+Next up: **Phase 10 — mobile responsiveness + UI polish**.

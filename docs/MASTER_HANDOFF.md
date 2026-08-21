@@ -6,10 +6,34 @@ technical design and per-phase implementation detail, see
 [docs/ARCHITECTURE.md](ARCHITECTURE.md); for a chronological log of every
 change and how it was tested, see [../CHANGELOG.md](../CHANGELOG.md).
 
-## Current state: Phase 8 complete ✅
+## Current state: Phase 9 complete ✅
 
-**Phases 1–8 are done and validated.** The game now supports the entire
-core loop, and survives players (including the host) dropping mid-game:
+**Phases 1–9 are done and validated.** The game now supports the entire
+core loop, survives players (including the host) dropping mid-game, and
+every mutating server function is rate-limited against tight-loop abuse.
+
+Phase 9 (security + anti-cheat hardening) closed the two concrete gaps
+this doc's previous revision named:
+1. **Rate limiting**, on all 13 mutating/enumeration-sensitive functions
+   — `supabase/migrations/0014_security_hardening.sql`'s
+   `enforce_rate_limit()` helper, called at the top of each one. Limits
+   are generous multiples of real client cadence, so normal play never
+   trips them (confirmed by a full end-to-end game playthrough during
+   testing).
+2. **A genuine TOCTOU race in `claim_host`** — it used to read the host's
+   staleness, then write based on that snapshot, leaving a window where a
+   concurrent `heartbeat()` from the real host could land in between and
+   get them incorrectly demoted. Fixed with `select ... for update` on
+   the host row so the two operations now serialize instead of racing.
+   Verified with an actual two-session concurrency test, not just code
+   review — see CHANGELOG's Phase 9 entry for the measured blocking
+   behavior.
+
+`submit_answer`'s timing anti-cheat (Phase 6 — server-computed
+`response_time_ms`, never client-reported) was re-checked and confirmed
+to need no further work.
+
+**Phase 8's disconnect/reconnect mechanics, unchanged this phase:**
 
 ```
 WAITING → COUNTDOWN → QUESTION → REVEAL → LEADERBOARD → (next QUESTION | FINISHED)
@@ -55,8 +79,8 @@ header comment for the reasoning.
 | 6 | Answer submission + scoring | ✅ Done |
 | 7 | Leaderboard + final results | ✅ Done |
 | 8 | Disconnect/reconnect handling | ✅ Done |
-| 9 | Security + anti-cheat hardening | ⬜ **Next task** |
-| 10 | Mobile responsiveness + UI polish | ⬜ Not started |
+| 9 | Security + anti-cheat hardening | ✅ Done |
+| 10 | Mobile responsiveness + UI polish | ⬜ **Next task** |
 | 11 | Testing + bug fixing | ⬜ Not started |
 | 12 | Production deployment | ⬜ Not started |
 | 14 | Expand question bank to 240 | ⬜ Not started (deferred from Phase 5) |
@@ -104,47 +128,90 @@ header comment for the reasoning.
 - `LeaderboardScreen` — optional "N of M connected" note.
 - `Results.tsx` — same identity fix as `GameRoom.tsx`.
 
-## Next task: Phase 9 — security and anti-cheat hardening
+## What Phase 9 actually built (so you don't re-derive it)
 
-`docs/ARCHITECTURE.md`'s roadmap table names this next; check that file
-for whatever specifics it has (search for "Phase 9" and "anti-cheat") the
-same way Phase 8's section there pointed at "Presence"/"disconnect"
-before starting. Based on what's already in place vs. not, at minimum
-this phase likely needs to look at:
+- `supabase/migrations/0014_security_hardening.sql`:
+  - `rate_limit_hits` table — one row per `(user_id, action)`, sliding
+    window (`window_start`, `call_count`). RLS enabled, zero policies,
+    explicit `revoke all ... from anon, authenticated` — same
+    defense-in-depth pattern as every other table since 0005/0006. Rows
+    are never pruned; it's an upsert-in-place counter bounded by
+    `(real users) × (13 actions)`, not an append-only log, so no cleanup
+    job was needed.
+  - `enforce_rate_limit(p_action, p_max_calls, p_window_seconds)` —
+    internal helper, single upsert, raises once a caller's count exceeds
+    the limit within the window. **Not** granted `EXECUTE` to
+    `authenticated`/`anon` — same "revoked from public, called only from
+    inside another `SECURITY DEFINER` function" pattern
+    `generate_room_code()` already used. Confirmed uncallable directly by
+    either client role via `has_function_privilege()`.
+  - Every mutating function (plus `lookup_game_by_room_code`, the one
+    enumeration-sensitive read) got a `perform enforce_rate_limit(...)`
+    call right after its existing "must be signed in" check —
+    `create_game`, `join_game`, `remove_player`, `start_game`,
+    `begin_first_question`, `submit_answer`, `end_question`,
+    `advance_to_leaderboard`, `advance_question`, `heartbeat`,
+    `mark_stale_players`, `claim_host`, `lookup_game_by_room_code`.
+    Limits are generous multiples of real client cadence (see
+    CHANGELOG's Phase 9 entry for the exact numbers) — confirmed by a
+    full end-to-end game playthrough that no legitimate call sequence
+    ever trips one.
+  - `claim_host`'s TOCTOU race fix: the host row is now read with
+    `select ... for update` instead of a plain `select ... into`, so a
+    concurrent `heartbeat()` from the real host serializes against a
+    `claim_host` call instead of racing it. This was Phase 8's
+    `claim_host`, re-examined per this doc's own previous "confirm there
+    isn't a subtler race" note — and there was one. Verified with an
+    actual two-session concurrency test (one session holds the row lock
+    via an explicit transaction + `pg_sleep`, a concurrent session's
+    `UPDATE` on the same row measurably blocks until the lock releases),
+    not just reasoned about.
+  - `submit_answer`'s timing/scoring anti-cheat was re-checked against
+    this doc's own previous item 3 and confirmed to need no changes —
+    `response_time_ms` and correctness were already fully server-computed
+    since Phase 6.
+- `src/lib/gameApi.ts` — added `"You are doing that too fast"` to
+  `friendlyMessage`'s known-message list, so a rate-limited call surfaces
+  a clean message instead of the generic fallback. No other frontend
+  changes this phase.
 
-1. **Rate limiting on state-transition functions.** Nothing currently
-   stops a malicious client from hammering `submit_answer`,
-   `advance_question`, `claim_host`, etc. in a tight loop. Every one of
-   these functions already has its own correctness checks (right phase,
-   right caller, etc.), but repeated *valid* calls in quick succession —
-   e.g. spamming `mark_stale_players` — aren't rate-limited at all. Decide
-   whether this needs a real mechanism (a `rate_limit_hits` table + a
-   check at the top of each function, or Supabase's built-in
-   `auth.rate_limit` type features if applicable) or whether the
-   `SECURITY DEFINER` + RLS model already makes this a non-issue in
-   practice (spamming a correctly-guarded function mostly just wastes the
-   caller's own quota, not others' game state) — that determination
-   itself is Phase 9 work, not something to assume either way.
-2. **`claim_host` abuse potential specifically** — new in Phase 8, so
-   Phase 7's security review never looked at it. Worth checking: can a
-   player deliberately stop heartbeating to force a host transfer away
-   from an active host who's just being slow, then heartbeat again
-   immediately after to "steal" a game? Current design requires the
-   *outgoing* host to actually go 20s+ stale first (checked server-side),
-   so a healthy host can't be forced out by someone else's inaction —
-   but confirm there isn't a subtler race (e.g. calling `claim_host`
-   in the same instant the real host's heartbeat lands).
-3. **Timing/scoring anti-cheat beyond what Phase 6 already built** —
-   `submit_answer` already computes `response_time_ms` server-side from
-   `question_started_at`, never a client-reported value (see Phase 6's
-   CHANGELOG entry), so the obvious "claim I answered instantly" vector
-   is already closed. Check `docs/ARCHITECTURE.md`'s "Security model"
-   section for whatever else it flags as still open.
-4. Whatever else `docs/ARCHITECTURE.md`'s own Phase 9 notes (if any exist
-   beyond the roadmap table) call out — read it before assuming this list
-   above is complete; it was compiled from the current codebase's own
-   gaps, not from architecture doc content specific to Phase 9, since
-   that section wasn't fleshed out in detail the way Phase 8's was.
+## Next task: Phase 10 — mobile responsiveness + UI polish
+
+`docs/ARCHITECTURE.md`'s roadmap table names this next. Read whatever
+specifics it has on Phase 10 (search for "Phase 10", "mobile",
+"responsive") the same way each prior phase's handoff section pointed at
+that file's own notes before starting — this doc's list below is
+compiled from what's known about the current UI, not from ARCHITECTURE's
+Phase-10-specific content, since (like Phase 9 before it) that section
+wasn't necessarily fleshed out in the same depth as earlier phases were.
+At minimum, likely worth checking:
+
+1. **An actual pass on real/emulated small-viewport devices**, not just
+   "it uses Tailwind so it's probably fine." Every screen so far
+   (`Home`, `CreateGame`, `JoinGame`, lobby, `QuestionScreen`,
+   `RevealScreen`, `LeaderboardScreen`, `Results`) was built and validated
+   functionally, but no phase has done a dedicated responsive/mobile
+   layout review — check tap target sizes on the answer-option buttons
+   specifically (this is a Kahoot-style "everyone answers on their own
+   phone" game; `QuestionScreen` is the screen under the most real-world
+   mobile pressure), text wrapping on long nicknames/prompts, and how the
+   countdown/timer UI behaves on narrow screens.
+2. **`HostDisconnectedBanner`** (Phase 8) and the **leaderboard "N of M
+   connected" note** (Phase 8) were both explicitly built reusing
+   existing `Card`/`Button` primitives and design tokens with *no*
+   mobile-specific polish pass — Phase 8's handoff deferred that here by
+   name. Worth revisiting once the rest of the mobile pass is underway,
+   not necessarily first.
+3. **`src/index.css`'s design tokens** (Phase 1) were built with a
+   distinct visual identity (jeepney-stripes motif, mango/ube/sunset/
+   bagoong accents) — Phase 10 should extend that system responsively
+   rather than introducing new tokens or falling back to generic
+   Tailwind defaults at small breakpoints.
+4. Whatever else `docs/ARCHITECTURE.md`'s own Phase 10 notes call out.
+
+Do **not** start Phase 11 (testing + bug fixing) or Phase 12 (production
+deployment) early, and do not touch the question bank (Phase 14,
+deliberately deferred — see "Things to *not* redo" below).
 
 ## How to test your work (do this — don't just review the SQL)
 
@@ -236,10 +303,19 @@ changes don't add *new* errors to that count.
   Phase 5's CHANGELOG entry.
 - Don't rebuild Realtime, RLS, the create/join functions, the
   WAITING→COUNTDOWN→QUESTION→REVEAL→LEADERBOARD→(QUESTION|FINISHED)
-  transitions, or the new heartbeat/staleness/host-transfer mechanics from
-  Phase 8 — all implemented and tested. Reuse `useGameRealtime`,
-  `useHeartbeat`, `useCurrentUserId`, the existing `gameApi.ts` patterns,
-  and the existing design tokens (`src/index.css`) rather than
+  transitions, the heartbeat/staleness/host-transfer mechanics from
+  Phase 8, or the rate-limiting/`claim_host` race fix from Phase 9 — all
+  implemented and tested. Reuse `useGameRealtime`, `useHeartbeat`,
+  `useCurrentUserId`, `enforce_rate_limit`, the existing `gameApi.ts`
+  patterns, and the existing design tokens (`src/index.css`) rather than
   introducing new ones.
-- Don't skip ahead to Phase 10 (mobile polish) or beyond — Phase 9 is the
-  immediate next task.
+- Don't re-litigate the rate limit numbers chosen in
+  `0014_security_hardening.sql` without a concrete reason — they were
+  deliberately set as generous multiples of real client cadence and
+  confirmed not to interfere with a full end-to-end game playthrough. If
+  Phase 10 or later changes any client polling/call pattern (e.g. adds
+  polling to a currently event-driven fetch), revisit the relevant
+  limit then, not preemptively.
+- Don't skip ahead to Phase 11 (testing + bug fixing) or Phase 12
+  (production deployment) — Phase 10 (mobile responsiveness + UI polish)
+  is the immediate next task.
