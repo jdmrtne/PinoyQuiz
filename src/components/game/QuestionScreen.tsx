@@ -8,11 +8,20 @@ export function QuestionScreen({
   question,
   answeredIndex,
   onAnswer,
+  canChangeAnswer,
+  isAutomatic,
 }: {
   question: CurrentQuestion;
   /** Displayed slot (0-3) this player already picked, or null if not answered yet. */
   answeredIndex: number | null;
   onAnswer: (index: number) => void;
+  /** true when games.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS" — an
+   * already-picked option stays tappable (to switch to a different one)
+   * right up until the timer runs out, instead of locking on first tap. */
+  canChangeAnswer: boolean;
+  /** true when games.game_mode === "AUTOMATIC" — only changes the footer
+   * copy below ("waiting for the host" doesn't apply to an automatic game). */
+  isAutomatic: boolean;
 }) {
   const remaining = useServerTimer(
     question.questionStartedAt,
@@ -46,7 +55,12 @@ export function QuestionScreen({
         <div className="grid grid-cols-1 gap-3">
           {question.options.map((opt, i) => {
             const isPicked = answeredIndex === i;
-            const disabled = hasAnswered || timeUp;
+            // Under CHANGE_UNTIL_TIMER_ENDS, an already-answered question
+            // stays interactive (so a different option can still be
+            // picked) right up until the timer actually runs out — only
+            // `timeUp` disables it. Under LOCK_ON_SELECTION, the very first
+            // pick disables everything, same as before this feature.
+            const disabled = timeUp || (hasAnswered && !canChangeAnswer);
             return (
               <button
                 key={i}
@@ -80,11 +94,17 @@ export function QuestionScreen({
         </div>
 
         <p className="text-xs text-center text-sampaguita/30">
-          {hasAnswered
-            ? "Answer locked in — waiting for the host to reveal the result."
-            : timeUp
-              ? "Time's up! Waiting for the host to reveal the result."
-              : "Tap an answer before time runs out."}
+          {hasAnswered && canChangeAnswer && !timeUp
+            ? "Answer selected — you can still change it until time runs out."
+            : hasAnswered && !timeUp
+              ? isAutomatic
+                ? "Answer locked in — the game will continue automatically."
+                : "Answer locked in — waiting for the host to reveal the result."
+              : timeUp
+                ? isAutomatic
+                  ? "Time's up! The game will continue automatically."
+                  : "Time's up! Waiting for the host to reveal the result."
+                : "Tap an answer before time runs out."}
         </p>
       </div>
     </div>

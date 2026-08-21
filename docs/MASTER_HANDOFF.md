@@ -6,7 +6,61 @@ technical design and per-phase implementation detail, see
 [docs/ARCHITECTURE.md](ARCHITECTURE.md); for a chronological log of every
 change and how it was tested, see [../CHANGELOG.md](../CHANGELOG.md).
 
-## Current state: Phase 11 complete ✅
+## Current state: Phase 12 complete ✅
+
+**Phases 1–12 are done and validated.** The game supports the entire core
+loop, survives players (including the host) dropping mid-game, every
+mutating server function is rate-limited against tight-loop abuse, every
+screen uses mobile-correct viewport sizing with real touch targets on the
+controls that need them, there's real automated test coverage (SQL
+scenarios + Vitest), and — new this phase — a host can now choose
+**Automatic** game pacing (no manual Next Question/End Question clicks
+needed) and **Change Until Timer Ends** answer behavior (players can
+switch their pick right up until time runs out), independently of each
+other, without breaking anything from Phases 1–11.
+
+Phase 12 (Automatic Mode & Configurable Answer Behavior) added:
+
+1. **`game_mode` setting** (`HOST_CONTROLLED` | `AUTOMATIC`, chosen at
+   `create_game` time, defaults to `HOST_CONTROLLED`). In Automatic mode
+   the host still creates the room, configures it, waits for players, and
+   clicks Start Game — everything after that (`COUNTDOWN → QUESTION →
+   REVEAL → LEADERBOARD → next QUESTION | FINISHED`) runs on its own. The
+   mechanism: a new `auto_advance_game(p_game_id)` SQL function, callable
+   by **any** participant, gated on real server-elapsed time
+   (`games.phase_started_at` for COUNTDOWN/REVEAL/LEADERBOARD, the
+   pre-existing `question_started_at` for QUESTION) and row-locked
+   (`for update`) so concurrent calls from multiple clients' polling
+   timers can't double-advance. `src/hooks/useAutoAdvance.ts` polls it
+   every 1s from **every** connected client (not just the host's) — that's
+   what lets the game keep running even if the host disconnects, since
+   this stack has no server-side cron/Edge Functions to fall back on. Full
+   design rationale is in the migration's own header comment — it's long
+   on purpose; read it before touching this again.
+2. **`answer_behavior` setting** (`LOCK_ON_SELECTION` |
+   `CHANGE_UNTIL_TIMER_ENDS`, defaults to `LOCK_ON_SELECTION`, the
+   pre-existing behavior). Under `CHANGE_UNTIL_TIMER_ENDS`, `submit_answer`
+   upserts instead of insert-only-and-reject; only the latest pick is ever
+   stored, and `players.score` is adjusted by the delta between the new
+   and previous points so switching answers never double-counts.
+3. A small, deliberate hardening flagged in both the migration and
+   CHANGELOG rather than left silent: `submit_answer` now also rejects a
+   submission once real elapsed time has passed the time limit, even if
+   `status` technically hasn't flipped to `REVEAL` yet — applies to both
+   answer behaviors, strictly tighter than before.
+
+**Everything from Phases 1–11, unchanged this phase:** the core state
+machine, scoring formula, heartbeat/staleness disconnect handling,
+`claim_host` reassignment, and rate-limiting are all still exactly as
+documented below — this phase only added two new settings and the
+Automatic-mode advancement path alongside them. Every changed SQL function
+(`create_game`, `start_game`, `submit_answer`, `end_question`,
+`advance_to_leaderboard`) keeps its pre-existing behavior for any game
+that doesn't opt into the new settings — verified directly by the new
+test scenarios, not just assumed. See CHANGELOG's Phase 12 entry for the
+full "validated by testing" list.
+
+## Previous state: Phase 11 complete ✅
 
 **Phases 1–11 are done and validated.** The game supports the entire core
 loop, survives players (including the host) dropping mid-game, every
@@ -108,8 +162,49 @@ changes.
 | 9 | Security + anti-cheat hardening | ✅ Done |
 | 10 | Mobile responsiveness + UI polish | ✅ Done |
 | 11 | Testing + bug fixing | ✅ Done |
-| 12 | Production deployment | ⬜ **Next task** |
+| 12 | Automatic Mode + Configurable Answer Behavior | ✅ Done |
+| 13 | Production deployment | ⬜ **Next task** |
 | 14 | Expand question bank to 240 | ⬜ Not started (deferred from Phase 5) |
+
+## What Phase 12 actually built (so you don't re-derive it)
+
+- `supabase/migrations/0015_automatic_mode_and_answer_behavior.sql` — new
+  `game_mode`/`answer_behavior` enums, `games.game_mode`/`answer_behavior`/
+  `phase_started_at` columns (all defaulted for backward compatibility),
+  `create_game` extended (old 5-arg signature explicitly dropped first),
+  `submit_answer`/`start_game`/`end_question`/`advance_to_leaderboard`
+  updated in place, and the new `auto_advance_game` function. **Read this
+  migration's header comment before changing any of this** — it explains
+  why Automatic mode works the way it does given this stack has no
+  server-side cron/Edge Functions, rather than assuming a background job
+  exists somewhere.
+- `supabase/tests/run_scenarios.sql` — scenarios 9–13 (23 new assertions,
+  59 total). Re-run the same way as before:
+  `psql -d pinoyquiz_test -v ON_ERROR_STOP=1 -f supabase/tests/run_scenarios.sql`
+  against a fresh disposable Postgres (see "How to test your work" below).
+- `src/hooks/useAutoAdvance.ts` — new, every-client polling hook, same
+  shape as `useHeartbeat.ts`.
+- `src/data/gameOptions.ts` (+ `.test.ts`) — `GAME_MODE_*`/
+  `ANSWER_BEHAVIOR_*` label/description/option tables.
+- `src/pages/CreateGame.tsx` — two new `SelectPills` groups with
+  description text.
+- `src/pages/GameRoom.tsx` — `isAutomatic` derived from `game.game_mode`;
+  every host-only manual-transition handler now short-circuits when
+  Automatic; `handleAnswer` rewritten to support re-picking under
+  `CHANGE_UNTIL_TIMER_ENDS`.
+- `src/components/game/QuestionScreen.tsx` — `canChangeAnswer`/
+  `isAutomatic` props control button disabling and helper copy.
+- `src/components/game/RevealScreen.tsx`,
+  `src/components/game/LeaderboardScreen.tsx` — new `isAutomatic` prop,
+  shows "Advancing automatically…" instead of a host button/wait message.
+- `src/types/database.types.ts`, `src/types/game.ts` — new enums/columns/
+  function signature.
+
+Full reasoning for every design decision (why polling instead of a real
+scheduled job, why the elapsed-time hardening in `submit_answer`, why the
+old `create_game` signature was dropped rather than just replaced) is in
+the migration's header comment and CHANGELOG's Phase 12 entry — read those
+instead of re-deriving the same tradeoffs from scratch.
 
 ## What Phase 11 actually built (so you don't re-derive it)
 
@@ -199,7 +294,7 @@ checklist to validate/expand, not a finished plan:
    `.env.local` — `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` need to
    be set in whatever CI/deploy environment builds this, sourced from a
    real (not local-test) Supabase project.
-3. **Every migration in `supabase/migrations/` (0001–0014) and the seed
+3. **Every migration in `supabase/migrations/` (0001–0015) and the seed
    file need to actually be applied against that real Supabase project**
    — this session's testing was all against a disposable local Postgres,
    never against a real hosted Supabase instance. That's a genuine,
@@ -266,7 +361,7 @@ Also needs a stub `supabase_realtime` publication before running
 `0008_realtime.sql`: `create publication supabase_realtime;`.
 
 Then run every migration file in `supabase/migrations/` **in numeric
-order** (`0001` through the newest — currently `0014`), then the seed
+order** (`0001` through the newest — currently `0015`), then the seed
 file in `supabase/seed/`, then simulate real users with a `do $$ ... $$`
 block: `insert into auth.users default values returning id into
 v_some_var;`, switch "who's calling" between statements with

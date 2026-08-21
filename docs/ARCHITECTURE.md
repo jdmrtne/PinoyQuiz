@@ -22,7 +22,8 @@ today.
 | 9 | Security + anti-cheat hardening | ✅ Done |
 | 10 | Mobile responsiveness + UI polish | ✅ Done |
 | 11 | Testing + bug fixing | ✅ Done |
-| 12 | Production deployment | ⬜ Not started |
+| 12 | Automatic Mode + Configurable Answer Behavior | ✅ Done |
+| 13 | Production deployment | ⬜ Not started |
 
 Work happens one phase at a time. Do not start a phase's code until the
 previous one is tested and documented.
@@ -688,4 +689,92 @@ new `src/`-level errors — `vitest`'s own dependency tree now exists in
 left out of this phase's scope (component-render testing, concurrency
 fuzzing) are in `CHANGELOG.md`'s Phase 11 entry.
 
-Next up: **Phase 12 — production deployment**.
+Next up: **Phase 12 — Automatic Mode + Configurable Answer Behavior**.
+
+## Phase 12 — Automatic Mode + Configurable Answer Behavior (done)
+
+Two new independent per-game settings, chosen at `create_game` time
+alongside category/difficulty/question count/time limit, both defaulted to
+Phases 1–11's only prior behavior so nothing existing changes unless a
+game explicitly opts in.
+
+**Game Mode: `HOST_CONTROLLED` (unchanged) | `AUTOMATIC` (new).** The
+interesting design question here wasn't the state machine itself — it's
+the same `WAITING → COUNTDOWN → QUESTION → REVEAL → LEADERBOARD → (next
+QUESTION | FINISHED)` machine Phase 5 built — it's *what drives the
+transitions* when no host click is available to do it. This project has no
+server-side scheduled-job infrastructure (no `pg_cron` extension, no
+Supabase Edge Functions anywhere in this repo), so "the backend advances
+the game on its own" can't mean a background process the way it might on
+a stack that had one. Instead, Automatic mode reuses the exact pattern
+Phase 8 already established for "the host might be the one who's gone"
+(`mark_stale_players`/`claim_host`): a new `auto_advance_game(p_game_id)`
+function that
+
+- any participant can call, not just the host,
+- is a pure no-op unless the current phase's server-anchored timestamp
+  shows real elapsed time past that phase's fixed duration, and
+- is safe to call redundantly and concurrently — it `select ... for
+  update`s the `games` row before checking anything, the same TOCTOU fix
+  Phase 9 applied to `claim_host`, so several clients' polling timers
+  landing moments apart serialize against each other instead of racing.
+
+`src/hooks/useAutoAdvance.ts` polls this every 1s from **every** connected
+client whenever `game_mode === "AUTOMATIC"` — not just the host's. That's
+what makes "host disconnecting during Automatic Mode doesn't stop the
+game" true in practice: as long as *any* participant's tab is open, that
+tab's polling keeps the game moving. A new nullable `games.phase_started_at`
+column anchors COUNTDOWN/REVEAL/LEADERBOARD's fixed durations (3s/6s/5s
+respectively — see the migration for why those specific numbers); QUESTION
+keeps using the pre-existing `question_started_at` untouched, since that
+was already server-anchored and already drove `submit_answer`'s
+response-time scoring.
+
+**Answer Behavior: `LOCK_ON_SELECTION` (unchanged) |
+`CHANGE_UNTIL_TIMER_ENDS` (new).** `submit_answer` branches on this at the
+top: `LOCK_ON_SELECTION` reproduces the exact pre-existing insert-and-
+reject-a-second-attempt body; `CHANGE_UNTIL_TIMER_ENDS` upserts
+(`on conflict (game_id, player_id, question_id) do update`) instead,
+recomputing correctness/points from scratch on every call. `players.score`
+is adjusted by the *delta* between the new submission's points and
+whatever that same row previously scored — never by the full new amount
+again — so switching A → C → B only ever contributes B's points to the
+running total, not A + C + B. One small hardening ships alongside this,
+applying to both behaviors: `submit_answer` now also rejects a submission
+once real elapsed time has passed `time_limit_seconds`, even if `status`
+technically hasn't flipped to `REVEAL` yet, closing the small window
+between the clock actually running out and `end_question`/
+`auto_advance_game` actually landing — a window that matters more once
+changing-until-the-wire is the intended interaction rather than an edge
+case.
+
+**Backward compatibility**, checked by test rather than assumed: both
+settings are `not null default` columns, `create_game`'s two new
+parameters are both defaulted (its old 5-argument signature was explicitly
+`drop function`-ed first, since Postgres treats a changed argument list as
+a distinct overload rather than something `create or replace` can widen),
+and every touched function keeps its exact prior behavior for a game that
+didn't opt in — Scenario 10 confirms `auto_advance_game` never touches a
+`HOST_CONTROLLED` game, Scenario 12 confirms `LOCK_ON_SELECTION` still
+hard-rejects a changed answer.
+
+**Testing**: rebuilt the same disposable local Postgres used since Phase
+2, applied all 15 migrations clean, and added scenarios 9–13 (23
+assertions, 59 total across the full suite) to `run_scenarios.sql` — a
+complete Automatic-mode game driven start-to-finish by
+`auto_advance_game` alone (backdating `phase_started_at`/
+`question_started_at` instead of sleeping through real durations), the
+no-op/no-double-advance safety properties, the `CHANGE_UNTIL_TIMER_ENDS`
+scoring-delta correctness, the `LOCK_ON_SELECTION` regression check, and
+the new elapsed-time cutoff. All pass on a clean re-run. `npm run build`
+and `npm run test` (22/22) both clean; `npx oxlint src` shows 0 errors,
+same pre-existing warning count as before this phase.
+
+Full design rationale (in far more depth than is useful to duplicate here)
+lives in `supabase/migrations/0015_automatic_mode_and_answer_behavior.sql`'s
+header comment — read that before changing any of this. The complete
+"validated by testing" list and what was deliberately left out (a true
+scheduled-job backend, live Realtime-wire verification, component-render
+tests) are in `CHANGELOG.md`'s Phase 12 entry.
+
+Next up: **Phase 13 — production deployment**.

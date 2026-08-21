@@ -27,6 +27,13 @@ export type QuestionDifficultyRow = "easy" | "medium" | "hard";
 export type GameDifficultySetting = QuestionDifficultyRow | "mixed";
 export type AnswerOptionRow = "A" | "B" | "C" | "D";
 
+// Added in 0015_automatic_mode_and_answer_behavior.sql. Both default to the
+// pre-existing (only) behavior — HOST_CONTROLLED / LOCK_ON_SELECTION — so
+// every game row from before this migration reads as one of these values,
+// never null/undefined.
+export type GameModeRow = "HOST_CONTROLLED" | "AUTOMATIC";
+export type AnswerBehaviorRow = "LOCK_ON_SELECTION" | "CHANGE_UNTIL_TIMER_ENDS";
+
 export interface Database {
   public: {
     Tables: {
@@ -49,6 +56,9 @@ export interface Database {
           current_question_index: number;
           current_question_id: string | null;
           question_started_at: string | null;
+          game_mode: GameModeRow;
+          answer_behavior: AnswerBehaviorRow;
+          phase_started_at: string | null;
           created_at: string;
           started_at: string | null;
           finished_at: string | null;
@@ -160,6 +170,8 @@ export interface Database {
           p_question_count?: number;
           p_time_limit_seconds?: number;
           p_host_nickname?: string;
+          p_game_mode?: GameModeRow;
+          p_answer_behavior?: AnswerBehaviorRow;
         };
         Returns: {
           out_game_id: string;
@@ -272,6 +284,10 @@ export interface Database {
           out_new_host_nickname: string;
         }[];
       };
+      auto_advance_game: {
+        Args: { p_game_id: string };
+        Returns: undefined;
+      };
     };
     Enums: {
       game_status: GameStatusRow;
@@ -280,6 +296,8 @@ export interface Database {
       question_difficulty: QuestionDifficultyRow;
       game_difficulty_setting: GameDifficultySetting;
       answer_option: AnswerOptionRow;
+      game_mode: GameModeRow;
+      answer_behavior: AnswerBehaviorRow;
     };
   };
 }

@@ -352,6 +352,242 @@ begin
   );
 end $$;
 
+-- ---------------------------------------------------------------------
+-- Scenario 9 (0015): Automatic mode end-to-end — a 2-question game that
+-- never calls begin_first_question/end_question/advance_to_leaderboard/
+-- advance_question at all, only auto_advance_game, driven purely by
+-- backdating the relevant *_started_at column instead of actually
+-- sleeping through each phase's real duration (same shortcut Scenario 8
+-- uses for staleness).
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_host_uid uuid;
+  v_game_id uuid;
+  v_room_code text;
+  v_host_player_id uuid;
+begin
+  insert into auth.users default values returning id into v_host_uid;
+  perform set_config('request.jwt.claim.sub', v_host_uid::text, false);
+  select out_game_id, out_room_code, out_player_id into v_game_id, v_room_code, v_host_player_id
+    from create_game('trivia', 'easy', 2::smallint, 5::smallint, 'AutoHost', 'AUTOMATIC'::game_mode, 'LOCK_ON_SELECTION'::answer_behavior);
+
+  perform test_assert(
+    (select game_mode from games where id = v_game_id) = 'AUTOMATIC',
+    'scenario9: create_game persists AUTOMATIC game_mode'
+  );
+
+  perform start_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'COUNTDOWN', 'scenario9: start_game -> COUNTDOWN (host action, unchanged)');
+
+  -- Not enough time has passed yet — a poll right after COUNTDOWN begins
+  -- must be a no-op, not an early transition.
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'COUNTDOWN', 'scenario9: auto_advance_game is a no-op before COUNTDOWN_SECONDS elapses');
+
+  update games set phase_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'QUESTION', 'scenario9: auto_advance_game moves COUNTDOWN -> QUESTION once elapsed, with no host click');
+  perform test_assert((select current_question_index from games where id = v_game_id) = 0, 'scenario9: first question is question_order 0');
+
+  -- No one answers question 1 at all — auto_advance_game must still end it
+  -- and record a no-answer row, exactly like end_question would.
+  update games set question_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'REVEAL', 'scenario9: auto_advance_game moves QUESTION -> REVEAL once the time limit elapses');
+  perform test_assert(
+    (select count(*) from answers where game_id = v_game_id) = 1,
+    'scenario9: a no-answer row was recorded for the player who never submitted'
+  );
+
+  update games set phase_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'LEADERBOARD', 'scenario9: auto_advance_game moves REVEAL -> LEADERBOARD once elapsed');
+
+  update games set phase_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'QUESTION', 'scenario9: auto_advance_game moves LEADERBOARD -> next QUESTION (question 2 of 2)');
+  perform test_assert((select current_question_index from games where id = v_game_id) = 1, 'scenario9: second question is question_order 1');
+
+  -- Drive question 2 all the way to FINISHED the same way.
+  update games set question_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  update games set phase_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  update games set phase_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario9: auto_advance_game reaches FINISHED after the last question''s LEADERBOARD elapses');
+  perform test_assert((select finished_at from games where id = v_game_id) is not null, 'scenario9: finished_at is stamped, same as the host-controlled advance_question path');
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Scenario 10 (0015): auto_advance_game is a harmless no-op, both for a
+-- Host-Controlled game (must never silently start advancing it) and for
+-- a redundant call right after a real transition already happened (the
+-- concurrent-callers case — several clients' polling timers landing
+-- moments apart, see this migration's `for update` lock).
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_uid uuid;
+  v_game_id uuid;
+  v_room_code text;
+begin
+  insert into auth.users default values returning id into v_uid;
+  perform set_config('request.jwt.claim.sub', v_uid::text, false);
+  select out_game_id, out_room_code into v_game_id, v_room_code
+    from create_game('food', 'easy', 1::smallint, 5::smallint, 'ManualHost');
+  perform test_assert(
+    (select game_mode from games where id = v_game_id) = 'HOST_CONTROLLED',
+    'scenario10: create_game defaults game_mode to HOST_CONTROLLED when omitted (backward compatibility)'
+  );
+
+  perform start_game(v_game_id);
+  update games set phase_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert(
+    (select status from games where id = v_game_id) = 'COUNTDOWN',
+    'scenario10: auto_advance_game never advances a HOST_CONTROLLED game, no matter how much time has passed'
+  );
+  perform begin_first_question(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'QUESTION', 'scenario10: host-controlled begin_first_question still works exactly as before');
+
+  -- Redundant-call safety, in an AUTOMATIC game this time: calling
+  -- auto_advance_game twice right after the real transition already
+  -- landed must not error or double-advance past the next phase.
+  perform set_config('request.jwt.claim.sub', v_uid::text, false);
+  select out_game_id into v_game_id
+    from create_game('food', 'easy', 1::smallint, 5::smallint, 'AutoHost2', 'AUTOMATIC'::game_mode);
+  perform start_game(v_game_id);
+  update games set phase_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id); -- COUNTDOWN -> QUESTION
+  perform auto_advance_game(v_game_id); -- redundant call, same tick
+  perform test_assert(
+    (select status from games where id = v_game_id) = 'QUESTION' and (select current_question_index from games where id = v_game_id) = 0,
+    'scenario10: a redundant auto_advance_game call right after a real transition is a no-op, not a double-advance'
+  );
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Scenario 11 (0015): CHANGE_UNTIL_TIMER_ENDS — a player picks A, then C,
+-- then B before the timer ends; only B is scored, and switching answers
+-- never double-counts points onto the running total.
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_host_uid uuid;
+  v_game_id uuid;
+  v_room_code text;
+  v_player_id uuid;
+  v_correct_slot smallint;
+  v_wrong_slot_1 smallint;
+  v_wrong_slot_2 smallint;
+  v_final answers%rowtype;
+  v_score_after_first int;
+  v_score_after_final int;
+begin
+  insert into auth.users default values returning id into v_host_uid;
+  perform set_config('request.jwt.claim.sub', v_host_uid::text, false);
+  select out_game_id, out_room_code, out_player_id into v_game_id, v_room_code, v_player_id
+    from create_game('culture', 'easy', 1::smallint, 30::smallint, 'ChangerNick', 'HOST_CONTROLLED'::game_mode, 'CHANGE_UNTIL_TIMER_ENDS'::answer_behavior);
+
+  perform start_game(v_game_id);
+  perform begin_first_question(v_game_id);
+
+  select (array_position(gq.shuffle_map, (array_position(array['A','B','C','D'], q.correct_option::text) - 1)) - 1)
+    into v_correct_slot
+  from game_questions gq join questions q on q.id = gq.question_id
+  where gq.id = (select current_question_id from games where id = v_game_id);
+
+  select min(s) into v_wrong_slot_1 from unnest(array[0,1,2,3]) s where s <> v_correct_slot;
+  select max(s) into v_wrong_slot_2 from unnest(array[0,1,2,3]) s where s <> v_correct_slot and s <> v_wrong_slot_1;
+
+  -- wrong -> wrong -> correct (the final answer).
+  perform submit_answer(v_game_id, v_wrong_slot_1::smallint);
+  select score into v_score_after_first from players where id = v_player_id;
+  perform test_assert(v_score_after_first = 0, 'scenario11: first (wrong) pick scores 0, as normal for an incorrect answer');
+
+  perform submit_answer(v_game_id, v_wrong_slot_2::smallint);
+  perform submit_answer(v_game_id, v_correct_slot::smallint);
+
+  select * into v_final from answers where game_id = v_game_id and player_id = v_player_id;
+  perform test_assert(
+    (select count(*) from answers where game_id = v_game_id and player_id = v_player_id) = 1,
+    'scenario11: changing an answer updates the same row (upsert), never inserts a second one'
+  );
+  perform test_assert(v_final.selected_option = v_correct_slot, 'scenario11: only the final (correct) selection is stored');
+  perform test_assert(v_final.is_correct = true, 'scenario11: the final selection is scored as correct');
+
+  select score into v_score_after_final from players where id = v_player_id;
+  perform test_assert(v_score_after_final = v_final.points, 'scenario11: switching answers never double-counts — final score equals exactly the final answer''s points, not a sum of every pick');
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Scenario 12 (0015): LOCK_ON_SELECTION (the default) still rejects a
+-- second submit_answer call outright — CHANGE_UNTIL_TIMER_ENDS above must
+-- not have loosened the default behavior for games that didn't opt in.
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_uid uuid;
+  v_game_id uuid;
+  v_raised boolean := false;
+begin
+  insert into auth.users default values returning id into v_uid;
+  perform set_config('request.jwt.claim.sub', v_uid::text, false);
+  select out_game_id into v_game_id
+    from create_game('sports', 'easy', 1::smallint, 30::smallint, 'LockerNick');
+  perform test_assert(
+    (select answer_behavior from games where id = v_game_id) = 'LOCK_ON_SELECTION',
+    'scenario12: create_game defaults answer_behavior to LOCK_ON_SELECTION when omitted (backward compatibility)'
+  );
+
+  perform start_game(v_game_id);
+  perform begin_first_question(v_game_id);
+  perform submit_answer(v_game_id, 0::smallint);
+
+  begin
+    perform submit_answer(v_game_id, 1::smallint);
+  exception when others then
+    v_raised := true;
+    perform test_assert(sqlerrm like '%already answered%', 'scenario12: second submit_answer under LOCK_ON_SELECTION is rejected with the existing friendly message');
+  end;
+  perform test_assert(v_raised, 'scenario12: LOCK_ON_SELECTION still hard-rejects a change, unaffected by 0015');
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Scenario 13 (0015): the new real-elapsed-time cutoff in submit_answer —
+-- a submission is rejected once the time limit has actually passed, even
+-- if `status` technically hasn't flipped to REVEAL yet (the small window
+-- this migration closes — see its header comment, section 2).
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_uid uuid;
+  v_game_id uuid;
+  v_raised boolean := false;
+begin
+  insert into auth.users default values returning id into v_uid;
+  perform set_config('request.jwt.claim.sub', v_uid::text, false);
+  select out_game_id into v_game_id
+    from create_game('geography', 'easy', 1::smallint, 5::smallint, 'LateNick', 'HOST_CONTROLLED'::game_mode, 'CHANGE_UNTIL_TIMER_ENDS'::answer_behavior);
+  perform start_game(v_game_id);
+  perform begin_first_question(v_game_id);
+
+  -- Simulate the clock having actually run out without end_question having
+  -- landed yet (status is still QUESTION).
+  update games set question_started_at = now() - interval '30 seconds' where id = v_game_id;
+  perform test_assert((select status from games where id = v_game_id) = 'QUESTION', 'scenario13: status is still QUESTION (end_question has not been called)');
+
+  begin
+    perform submit_answer(v_game_id, 0::smallint);
+  exception when others then
+    v_raised := true;
+    perform test_assert(sqlerrm like '%no longer accepting answers%', 'scenario13: submit_answer rejects a late submission by real elapsed time, not just by status');
+  end;
+  perform test_assert(v_raised, 'scenario13: the real-elapsed-time cutoff actually fired');
+end $$;
+
 drop function test_assert(boolean, text);
 
-\echo '=== All Phase 11 scenarios passed ==='
+\echo '=== All Phase 11 + Automatic Mode & Answer Behavior scenarios passed ==='

@@ -4,6 +4,8 @@ import type {
   GameCategorySetting,
   GameDifficultySetting,
   GameStatusRow,
+  GameModeRow,
+  AnswerBehaviorRow,
 } from "../types/database.types";
 import type { AnswerReveal, LeaderboardEntry } from "../types/game";
 
@@ -76,6 +78,10 @@ export interface CreateGameParams {
   questionCount: number;
   timeLimitSeconds: number;
   hostNickname: string;
+  /** Defaults to HOST_CONTROLLED server-side if omitted (0015 migration). */
+  gameMode?: GameModeRow;
+  /** Defaults to LOCK_ON_SELECTION server-side if omitted (0015 migration). */
+  answerBehavior?: AnswerBehaviorRow;
 }
 
 export interface CreateGameResult {
@@ -93,6 +99,8 @@ export async function createGame(
     p_question_count: params.questionCount,
     p_time_limit_seconds: params.timeLimitSeconds,
     p_host_nickname: params.hostNickname,
+    p_game_mode: params.gameMode,
+    p_answer_behavior: params.answerBehavior,
   });
   return {
     gameId: row.out_game_id,
@@ -297,6 +305,21 @@ export async function claimHost(gameId: string): Promise<ClaimHostResult> {
     newHostPlayerId: row.out_new_host_player_id,
     newHostNickname: row.out_new_host_nickname,
   };
+}
+
+/**
+ * Automatic mode (0015_automatic_mode_and_answer_behavior.sql). Any
+ * participant calls this on a short poll interval whenever
+ * games.game_mode === "AUTOMATIC" — see src/hooks/useAutoAdvance.ts. It's a
+ * silent no-op unless the current phase's server-anchored timer has
+ * actually elapsed, so calling it redundantly/concurrently from every
+ * connected client is expected and harmless (the DB function row-locks and
+ * re-checks before acting). This is what keeps an Automatic-mode game
+ * moving even if the host's tab closes — every other client keeps polling
+ * independently.
+ */
+export async function autoAdvanceGame(gameId: string): Promise<void> {
+  await callRpc("auto_advance_game", { p_game_id: gameId });
 }
 
 export interface JoinGameResult {

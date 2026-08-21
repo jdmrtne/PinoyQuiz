@@ -15,6 +15,7 @@ export function LeaderboardScreen({
   entries,
   currentPlayerId,
   isHost,
+  isAutomatic,
   isLastQuestion,
   onAdvance,
   advancing,
@@ -24,6 +25,7 @@ export function LeaderboardScreen({
   entries: LeaderboardEntry[];
   currentPlayerId: string | null;
   isHost: boolean;
+  isAutomatic: boolean;
   isLastQuestion: boolean;
   onAdvance: () => void;
   advancing: boolean;
@@ -88,7 +90,11 @@ export function LeaderboardScreen({
           })}
         </Card>
 
-        {isHost ? (
+        {isAutomatic ? (
+          <Card className="p-4 text-center text-sm text-sampaguita/60">
+            {isLastQuestion ? "Finishing up…" : "Advancing automatically…"}
+          </Card>
+        ) : isHost ? (
           <Button size="lg" onClick={onAdvance} disabled={advancing}>
             {advancing
               ? "Loading…"

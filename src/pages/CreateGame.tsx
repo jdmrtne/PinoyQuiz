@@ -11,11 +11,19 @@ import {
   DIFFICULTY_OPTIONS,
   QUESTION_COUNT_OPTIONS,
   TIME_LIMIT_OPTIONS,
+  GAME_MODE_LABELS,
+  GAME_MODE_DESCRIPTIONS,
+  GAME_MODE_OPTIONS,
+  ANSWER_BEHAVIOR_LABELS,
+  ANSWER_BEHAVIOR_DESCRIPTIONS,
+  ANSWER_BEHAVIOR_OPTIONS,
 } from "../data/gameOptions";
 import { createGame, GameApiError } from "../lib/gameApi";
 import type {
   GameCategorySetting,
   GameDifficultySetting,
+  GameModeRow,
+  AnswerBehaviorRow,
 } from "../types/database.types";
 
 export default function CreateGame() {
@@ -25,6 +33,10 @@ export default function CreateGame() {
   const [difficulty, setDifficulty] = useState<GameDifficultySetting>("mixed");
   const [questionCount, setQuestionCount] = useState(10);
   const [timeLimit, setTimeLimit] = useState(15);
+  const [gameMode, setGameMode] = useState<GameModeRow>("HOST_CONTROLLED");
+  const [answerBehavior, setAnswerBehavior] = useState<AnswerBehaviorRow>(
+    "LOCK_ON_SELECTION"
+  );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -45,6 +57,8 @@ export default function CreateGame() {
         questionCount,
         timeLimitSeconds: timeLimit,
         hostNickname: nickname.trim(),
+        gameMode,
+        answerBehavior,
       });
       navigate(`/game/${result.roomCode}`, {
         state: { playerId: result.playerId, isHost: true },
@@ -125,6 +139,36 @@ export default function CreateGame() {
                 onChange={setTimeLimit}
                 suffix="s"
               />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-sampaguita/80">
+                Game Mode
+              </span>
+              <SelectPills
+                options={GAME_MODE_OPTIONS}
+                value={gameMode}
+                onChange={setGameMode}
+                labels={GAME_MODE_LABELS}
+              />
+              <p className="text-xs text-sampaguita/50">
+                {GAME_MODE_DESCRIPTIONS[gameMode]}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-sampaguita/80">
+                Answer Behavior
+              </span>
+              <SelectPills
+                options={ANSWER_BEHAVIOR_OPTIONS}
+                value={answerBehavior}
+                onChange={setAnswerBehavior}
+                labels={ANSWER_BEHAVIOR_LABELS}
+              />
+              <p className="text-xs text-sampaguita/50">
+                {ANSWER_BEHAVIOR_DESCRIPTIONS[answerBehavior]}
+              </p>
             </div>
 
             {error && (

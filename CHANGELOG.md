@@ -1036,3 +1036,142 @@ just be confusing for the next session.
 
 **Next phase:** Phase 12 — production deployment.
 
+## Phase 12 — Automatic Mode & Configurable Answer Behavior ✅
+
+**Completed:**
+- `supabase/migrations/0015_automatic_mode_and_answer_behavior.sql` — two
+  new independent, orthogonal per-game settings chosen at `create_game`
+  time, both defaulting to Phases 1–11's only prior behavior:
+  - **Game Mode**: `HOST_CONTROLLED` (unchanged) | `AUTOMATIC` (new). In
+    Automatic mode the host still creates the room, configures it, waits
+    for players, and clicks Start Game — after that, nothing further is
+    required from the host. A new `auto_advance_game(p_game_id)` function,
+    callable by **any** participant (not host-restricted), drives every
+    remaining transition (`COUNTDOWN → QUESTION → REVEAL → LEADERBOARD →
+    next QUESTION | FINISHED`) once the relevant phase's real elapsed
+    server time has actually passed. Because every connected client polls
+    it independently (`src/hooks/useAutoAdvance.ts`, 1s interval), the game
+    keeps advancing even if the host disconnects mid-game — this project
+    has no server-side cron/Edge Function infrastructure, so "any
+    participant can trigger it, gated on real elapsed time, safe to call
+    redundantly" is the honest version of "the backend continues it" that
+    this stack can actually deliver; see the migration's header comment
+    for the full reasoning.
+  - **Answer Behavior**: `LOCK_ON_SELECTION` (unchanged — first tap wins,
+    a second `submit_answer` call is rejected) | `CHANGE_UNTIL_TIMER_ENDS`
+    (new — `submit_answer` upserts the same row instead of insert-only, so
+    a player can keep changing their pick; only the latest selection is
+    ever stored or scored, and `players.score` is adjusted by the *delta*
+    between the new and previous points so switching answers never
+    double-counts).
+  - A new `games.phase_started_at` column anchors COUNTDOWN/REVEAL/
+    LEADERBOARD timing for Automatic mode (QUESTION keeps using the
+    pre-existing `question_started_at`, untouched).
+  - Small deliberate hardening, flagged rather than silent: `submit_answer`
+    now also rejects a submission once real elapsed time has passed
+    `time_limit_seconds`, even if `status` hasn't flipped to `REVEAL` yet
+    — closes a small timing window that matters more once
+    change-until-the-wire is an intended interaction rather than an edge
+    case. Applies to both answer behaviors; strictly tighter than before,
+    never looser.
+  - `create_game`'s old 5-argument signature was explicitly dropped (not
+    just `create or replace`d) before creating the new 7-argument one,
+    since Postgres treats a changed argument-type list as a distinct
+    overload rather than a replacement — leaving the old 5-arg signature
+    callable alongside the new one would have been a silent footgun.
+- **Frontend**: `src/hooks/useAutoAdvance.ts` (new, mirrors
+  `useHeartbeat.ts`'s "every client, not just host" polling shape);
+  `CreateGame.tsx` gained Game Mode and Answer Behavior pill selectors with
+  short descriptions (`src/data/gameOptions.ts`); `GameRoom.tsx`'s
+  host-only manual transition handlers
+  (`handleCountdownComplete`/the QUESTION-timeout effect/
+  `handleContinueToLeaderboard`/`handleAdvanceQuestion`) are now no-ops in
+  Automatic mode, deferring entirely to `auto_advance_game`;
+  `QuestionScreen.tsx` allows re-selecting an answer under
+  `CHANGE_UNTIL_TIMER_ENDS` (only `timeUp` disables the buttons, not
+  `hasAnswered`) with an updated helper line telling the player they can
+  still change their pick; `RevealScreen.tsx`/`LeaderboardScreen.tsx` swap
+  the host's manual button for an "Advancing automatically…" message in
+  Automatic mode, for every player including the host.
+- `database.types.ts` — added `game_mode`/`answer_behavior` enums,
+  `games.game_mode`/`answer_behavior`/`phase_started_at` columns,
+  `create_game`'s two new Args, and the `auto_advance_game` function
+  signature.
+
+**Validated by testing, not just review:**
+- Rebuilt the same disposable local Postgres instance used in Phase
+  2/6/7/8/9/11 from scratch, applied all 15 migrations in order (0001
+  through this phase's 0015) plus the seed data — clean, no errors.
+- Extended `supabase/tests/run_scenarios.sql` with 5 new scenarios (9–13,
+  23 new assertions — 59 total across all 13 scenarios now, all passing on
+  a clean re-run):
+  - **Scenario 9**: a full 2-question `AUTOMATIC` game driven start-to-
+    finish by `auto_advance_game` alone (never calling
+    `begin_first_question`/`end_question`/`advance_to_leaderboard`/
+    `advance_question`), backdating `phase_started_at`/`question_started_at`
+    instead of sleeping through each real duration — confirms it's a
+    no-op before each phase's time is up, correctly records a no-answer
+    row for a player who never submitted, and reaches `FINISHED` with
+    `finished_at` stamped.
+  - **Scenario 10**: `auto_advance_game` is a harmless no-op on a
+    `HOST_CONTROLLED` game no matter how much time has passed, and a
+    redundant call immediately after a real transition doesn't
+    double-advance — the two safety properties the "any client can call
+    this, possibly at almost the same moment" design depends on.
+  - **Scenario 11**: `CHANGE_UNTIL_TIMER_ENDS` — wrong → wrong → correct in
+    one question; only one `answers` row ever exists (upsert, not insert),
+    only the final pick is stored/scored, and the player's final score
+    equals exactly that one answer's points (never a sum across the three
+    picks).
+  - **Scenario 12**: `LOCK_ON_SELECTION` (the default) still hard-rejects
+    a second `submit_answer` call with the pre-existing friendly message —
+    confirms Scenario 11's upsert path didn't loosen the default.
+  - **Scenario 13**: the new real-elapsed-time cutoff actually fires —
+    backdating `question_started_at` past the time limit while `status` is
+    still `QUESTION` (simulating the gap before `end_question`/
+    `auto_advance_game` lands) gets a late `submit_answer` call rejected.
+- `npm run build` (`tsc -b && vite build`): zero errors.
+- `npm run test` (vitest): 22/22 passing, up from 18 — added 4 new
+  `gameOptions.test.ts` cases (label/description table integrity for the
+  two new option sets, same shape as the existing category/difficulty
+  checks) on top of the 18 carried over unchanged from Phase 11.
+- `npx oxlint src`: 0 errors (10 pre-existing `exhaustive-deps` warnings,
+  same as before this phase — none introduced by these changes).
+
+**Backward compatibility, explicitly checked:** `game_mode` and
+`answer_behavior` are `not null default` columns and `create_game`'s two
+new parameters are both defaulted, so every pre-Phase-12 game row and every
+call from an un-upgraded client lands on exactly
+`HOST_CONTROLLED`/`LOCK_ON_SELECTION` — Phases 1–11's only behavior, with
+no migration of existing data required. No existing question, room,
+player, or answer data was touched; every changed function
+(`create_game`, `start_game`, `submit_answer`, `end_question`,
+`advance_to_leaderboard`) kept its pre-existing behavior for games that
+didn't opt into the new settings, verified directly by Scenarios 10 and
+12 above rather than left as an assumption.
+
+**Not included in this phase, and why:**
+- **No true server-side scheduled job** (pg_cron, Supabase Edge Function
+  cron trigger) driving Automatic mode — this stack has neither, and
+  standing one up is a hosting-platform/infrastructure decision that
+  belongs with Phase 13 (production deployment), not a schema migration.
+  The any-client-polls-`auto_advance_game` design is the pragmatic
+  equivalent given what's actually available; see this phase's migration
+  header comment for the full tradeoff reasoning.
+- **Realtime wire behavior for the new columns** wasn't (and can't be,
+  from this sandbox) exercised against a live Supabase project, same
+  standing limitation as every earlier phase's Realtime work — the
+  `postgres_changes` subscription already covers `games` UPDATE events
+  generically (`select("*")`), so the new columns ride along automatically
+  with no subscription changes needed, but the live wire behavior itself
+  is unverified here.
+- **No component-rendering tests** for the new `QuestionScreen`/
+  `RevealScreen`/`LeaderboardScreen` branches — same reasoning as Phase
+  11's entry (this codebase's UI is a thin renderer over server-validated
+  state; `tsc -b` plus the SQL-level correctness tests cover this
+  project's size).
+- Did not touch the question bank (Phase 14) or start Phase 13 (production
+  deployment).
+
+**Next phase:** Phase 13 — production deployment.
+

@@ -23,11 +23,17 @@ export type Category =
 
 export type Difficulty = "easy" | "medium" | "hard" | "mixed";
 
+/** Added alongside 0015_automatic_mode_and_answer_behavior.sql. */
+export type GameMode = "HOST_CONTROLLED" | "AUTOMATIC";
+export type AnswerBehavior = "LOCK_ON_SELECTION" | "CHANGE_UNTIL_TIMER_ENDS";
+
 export interface GameSettings {
   category: Category;
   difficulty: Difficulty;
   questionCount: number;
   timeLimitSeconds: number;
+  gameMode: GameMode;
+  answerBehavior: AnswerBehavior;
 }
 
 export interface Game {

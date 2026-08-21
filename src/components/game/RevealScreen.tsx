@@ -16,12 +16,14 @@ export function RevealScreen({
   question,
   reveal,
   isHost,
+  isAutomatic,
   onContinue,
   advancing,
 }: {
   question: CurrentQuestion;
   reveal: AnswerReveal;
   isHost: boolean;
+  isAutomatic: boolean;
   onContinue: () => void;
   advancing: boolean;
 }) {
@@ -122,7 +124,11 @@ export function RevealScreen({
           </Card>
         )}
 
-        {isHost ? (
+        {isAutomatic ? (
+          <p className="text-xs text-center text-sampaguita/30">
+            Advancing automatically…
+          </p>
+        ) : isHost ? (
           <Button size="lg" onClick={onContinue} disabled={advancing}>
             {advancing ? "Loading…" : "See Leaderboard"}
           </Button>

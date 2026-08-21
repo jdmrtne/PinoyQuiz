@@ -9,11 +9,12 @@ import { QuestionScreen } from "../components/game/QuestionScreen";
 import { RevealScreen } from "../components/game/RevealScreen";
 import { LeaderboardScreen } from "../components/game/LeaderboardScreen";
 import { HostDisconnectedBanner } from "../components/game/HostDisconnectedBanner";
-import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "../data/gameOptions";
+import { CATEGORY_LABELS, DIFFICULTY_LABELS, GAME_MODE_LABELS, ANSWER_BEHAVIOR_LABELS } from "../data/gameOptions";
 import { useGameRealtime } from "../hooks/useGameRealtime";
 import { useServerTimer } from "../hooks/useServerTimer";
 import { useCurrentUserId } from "../hooks/useCurrentUserId";
 import { useHeartbeat } from "../hooks/useHeartbeat";
+import { useAutoAdvance } from "../hooks/useAutoAdvance";
 import {
   removePlayer,
   startGame,
@@ -72,6 +73,17 @@ export default function GameRoom() {
     game?.id ?? null,
     currentPlayerId,
     !!game && game.status !== "FINISHED"
+  );
+
+  // Automatic mode: every connected client polls auto_advance_game while
+  // the game is in a timed phase — see useAutoAdvance.ts. A no-op entirely
+  // for Host-Controlled games (gated on game.game_mode inside the hook).
+  const isAutomatic = game?.game_mode === "AUTOMATIC";
+  useAutoAdvance(
+    game?.id ?? null,
+    currentPlayerId,
+    game?.game_mode ?? null,
+    game?.status ?? null
   );
 
   // The live host row (if any) — used both to show "N connected" context
@@ -172,16 +184,21 @@ export default function GameRoom() {
     });
   }, [game?.status, roomCode, navigate, currentPlayerId, isHost]);
 
-  // Host-only: once the display timer hits zero, end the question for
-  // everyone. This is purely a client-triggered transition (the server
-  // doesn't police the clock itself — see 0011_answer_submission.sql) so
-  // only the host's client does it, guarded so it fires once per question
-  // even though this timer re-renders every 250ms.
+  // Host-only, and only for Host-Controlled games: once the display timer
+  // hits zero, end the question for everyone. This is purely a
+  // client-triggered transition (the server doesn't police the clock
+  // itself — see 0011_answer_submission.sql) so only the host's client does
+  // it, guarded so it fires once per question even though this timer
+  // re-renders every 250ms. Automatic-mode games skip this entirely —
+  // auto_advance_game (polled by every client, not just the host — see
+  // useAutoAdvance) is what ends the question there instead, so this host
+  // client doesn't race its own end_question call against that.
   const remaining = useServerTimer(
     question?.questionStartedAt ?? null,
     question?.timeLimitSeconds ?? 0
   );
   useEffect(() => {
+    if (isAutomatic) return;
     if (!isHost || !game || game.status !== "QUESTION" || !question) return;
     if (remaining > 0) return;
     if (endQuestionCalledRef.current === question.questionId) return;
@@ -193,7 +210,7 @@ export default function GameRoom() {
         err instanceof GameApiError ? err.message : "Couldn't end the question."
       );
     });
-  }, [isHost, game, question, remaining]);
+  }, [isAutomatic, isHost, game, question, remaining]);
 
   async function handleStart() {
     if (!game) return;
@@ -212,6 +229,12 @@ export default function GameRoom() {
   }
 
   async function handleCountdownComplete() {
+    // Automatic mode: auto_advance_game (polled by every client) moves
+    // COUNTDOWN -> QUESTION on its own once COUNTDOWN_SECONDS elapses — see
+    // 0015_automatic_mode_and_answer_behavior.sql. The countdown animation
+    // still plays for everyone (cosmetic, via CountdownOverlay), it just
+    // isn't what triggers the real transition here.
+    if (isAutomatic) return;
     if (!game || !isHost) return;
     try {
       await beginFirstQuestion(game.id);
@@ -223,13 +246,17 @@ export default function GameRoom() {
   }
 
   async function handleAnswer(index: number) {
-    if (!game || answeredIndex !== null) return;
+    if (!game) return;
+    const canChangeAnswer = game.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS";
+    if (!canChangeAnswer && answeredIndex !== null) return;
+    if (answeredIndex === index) return; // re-tapping the same pick is a no-op
     setActionError(null);
-    setAnsweredIndex(index); // optimistic — locks the UI immediately
+    const previous = answeredIndex;
+    setAnsweredIndex(index); // optimistic — locks/updates the UI immediately
     try {
       await submitAnswer(game.id, index);
     } catch (err) {
-      setAnsweredIndex(null); // let them try again (e.g. transient network error)
+      setAnsweredIndex(previous); // revert to whatever was actually locked in
       setActionError(
         err instanceof GameApiError ? err.message : "Couldn't submit your answer."
       );
@@ -248,6 +275,7 @@ export default function GameRoom() {
   }
 
   async function handleContinueToLeaderboard() {
+    if (isAutomatic) return;
     if (!game || !isHost) return;
     setActionError(null);
     setAdvancing(true);
@@ -283,6 +311,7 @@ export default function GameRoom() {
   }
 
   async function handleAdvanceQuestion() {
+    if (isAutomatic) return;
     if (!game || !isHost) return;
     setActionError(null);
     setAdvancing(true);
@@ -357,6 +386,8 @@ export default function GameRoom() {
           question={question}
           answeredIndex={answeredIndex}
           onAnswer={handleAnswer}
+          canChangeAnswer={game.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS"}
+          isAutomatic={isAutomatic}
         />
       </>
     );
@@ -377,6 +408,7 @@ export default function GameRoom() {
           question={question}
           reveal={reveal}
           isHost={isHost}
+          isAutomatic={isAutomatic}
           onContinue={handleContinueToLeaderboard}
           advancing={advancing}
         />
@@ -400,6 +432,7 @@ export default function GameRoom() {
           entries={leaderboard}
           currentPlayerId={currentPlayerId}
           isHost={isHost}
+          isAutomatic={isAutomatic}
           isLastQuestion={isLastQuestion}
           onAdvance={handleAdvanceQuestion}
           advancing={advancing}
@@ -427,6 +460,9 @@ export default function GameRoom() {
           <p className="text-sampaguita/60 text-sm">
             {CATEGORY_LABELS[game.category]} · {DIFFICULTY_LABELS[game.difficulty]} ·{" "}
             {game.question_count} questions · {game.time_limit_seconds}s per question
+          </p>
+          <p className="text-sampaguita/40 text-xs mt-1">
+            {GAME_MODE_LABELS[game.game_mode]} · {ANSWER_BEHAVIOR_LABELS[game.answer_behavior]}
           </p>
         </div>
 
