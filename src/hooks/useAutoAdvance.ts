@@ -5,13 +5,16 @@ import type { GameModeRow, GameStatusRow } from "../types/database.types";
 // Deliberately shorter than useHeartbeat's 8s — this is what stands in for
 // COUNTDOWN/QUESTION/REVEAL/LEADERBOARD's server-side timer actually
 // firing, so a game shouldn't visibly stall for several seconds after each
-// phase's duration elapses. 1s keeps the perceived lag in line with how
-// promptly a host normally clicks "Next Question" by hand. See
-// auto_advance_game in 0015_automatic_mode_and_answer_behavior.sql — the
-// function itself is a no-op until the real elapsed time has passed, so
-// polling this often just means the transition lands within ~1s of being
-// due, not that anything expensive runs every second.
-const AUTO_ADVANCE_INTERVAL_MS = 1000;
+// phase's duration elapses. 500ms keeps the perceived lag well under the
+// smallest phase duration (LEADERBOARD_SECONDS is 2s as of
+// 0017_faster_automatic_mode_timing.sql — a full second of poll lag on top
+// of that would itself have been a noticeable chunk of a 2s phase). See
+// auto_advance_game — the function itself is a no-op until the real
+// elapsed time has passed, so polling this often just means the transition
+// lands within ~500ms of being due, not that anything expensive runs twice
+// a second. auto_advance_game's rate limit (60 calls / 20s per user, i.e.
+// an average of 3/s) comfortably allows 500ms's 2/s.
+const AUTO_ADVANCE_INTERVAL_MS = 500;
 
 const ACTIVE_STATUSES: GameStatusRow[] = [
   "COUNTDOWN",
@@ -50,7 +53,7 @@ export function useAutoAdvance(
       if (cancelled || !gameId) return;
       autoAdvanceGame(gameId).catch(() => {
         // Same rationale as useHeartbeat: a missed tick just means the
-        // next one (1s later, from this client or another) tries again.
+        // next one (500ms later, from this client or another) tries again.
       });
     }
 

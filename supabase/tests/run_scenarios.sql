@@ -822,4 +822,61 @@ end $$;
 
 drop function test_assert(boolean, text);
 
-\echo '=== All Phase 11 + Automatic Mode & Answer Behavior + Play Again scenarios passed ==='
+-- ---------------------------------------------------------------------
+-- Scenario 17 (0017): Automatic mode's REVEAL/LEADERBOARD durations are
+-- locked in at their retuned (faster) values — 3s and 2s respectively —
+-- so a future change can't silently regress back toward the original
+-- 6s/5s "too slow" durations without this test failing. Tests both
+-- edges: a poll just BEFORE the duration must still no-op, and a poll
+-- just AFTER it must transition.
+-- ---------------------------------------------------------------------
+create function test_assert(condition boolean, message text) returns void as $$
+begin
+  if condition then
+    raise notice 'PASS: %', message;
+  else
+    raise exception 'FAIL: %', message;
+  end if;
+end;
+$$ language plpgsql;
+
+do $$
+declare
+  v_uid uuid;
+  v_game_id uuid;
+begin
+  insert into auth.users default values returning id into v_uid;
+  perform set_config('request.jwt.claim.sub', v_uid::text, false);
+  select out_game_id into v_game_id
+    from create_game('food', 'easy', 1::smallint, 30::smallint, 'TimingHost', 'AUTOMATIC'::game_mode);
+  perform start_game(v_game_id);
+  update games set phase_started_at = now() - interval '10 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id); -- COUNTDOWN -> QUESTION
+  update games set question_started_at = now() - interval '60 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id); -- QUESTION -> REVEAL
+  perform test_assert((select status from games where id = v_game_id) = 'REVEAL', 'scenario17: setup — reached REVEAL');
+
+  -- REVEAL_SECONDS = 3: just under must still no-op.
+  update games set phase_started_at = now() - interval '2.5 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'REVEAL', 'scenario17: REVEAL does not advance before its 3s duration elapses');
+
+  -- Just over 3s must advance.
+  update games set phase_started_at = now() - interval '3.5 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'LEADERBOARD', 'scenario17: REVEAL advances to LEADERBOARD once its 3s duration elapses');
+
+  -- LEADERBOARD_SECONDS = 2: just under must still no-op.
+  update games set phase_started_at = now() - interval '1.5 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'LEADERBOARD', 'scenario17: LEADERBOARD does not advance before its 2s duration elapses');
+
+  -- Just over 2s must advance (only 1 question, so this reaches FINISHED).
+  update games set phase_started_at = now() - interval '2.5 seconds' where id = v_game_id;
+  perform auto_advance_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario17: LEADERBOARD advances once its 2s duration elapses');
+end $$;
+
+drop function test_assert(boolean, text);
+
+\echo '=== All Phase 11 + Automatic Mode & Answer Behavior + Play Again + Faster Timing scenarios passed ==='

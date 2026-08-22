@@ -1296,3 +1296,33 @@ behavior matching pre-migration behavior exactly.
 
 **Next phase:** Phase 14 — production deployment.
 
+## Automatic mode timing tune-up (0017) ✅
+
+Reported directly: Automatic mode felt slow. Cause: `auto_advance_game`'s
+fixed `REVEAL_SECONDS`/`LEADERBOARD_SECONDS` constants (set in Phase 12)
+were 6s and 5s — 11 seconds of pure dead time per question on top of
+however long the question itself took, before any poll lag on top of
+that.
+
+**Completed:**
+- `supabase/migrations/0017_faster_automatic_mode_timing.sql`: retuned
+  `REVEAL_SECONDS` 6→3 and `LEADERBOARD_SECONDS` 5→2.
+  `COUNTDOWN_SECONDS` (3) is unchanged — it's a cosmetic "3, 2, 1, Go" the
+  player is meant to watch, not dead time, and it has to keep matching
+  `CountdownOverlay`'s default. Net: ~11s of forced waiting per question
+  drops to ~5s.
+- `src/hooks/useAutoAdvance.ts`: poll interval 1000ms → 500ms, so the
+  extra lag between a phase's timer actually elapsing and some client's
+  next poll picking it up is also cut in half — comfortably inside
+  `auto_advance_game`'s existing rate limit (3 calls/s average allowed;
+  500ms is 2/s).
+
+**Validated by testing:** re-ran the full 83-assertion suite unmodified
+first (zero regressions — Scenario 9's backdating uses 10s offsets, well
+clear of either new threshold), then added Scenario 17 (5 assertions, 88
+total) locking in both new durations at their exact edges — a poll just
+under 3s/2s must still no-op, a poll just over must transition — so a
+future change can't silently regress this back toward "too slow" without
+a test failing. `npm run build`, `npm run test` (22/22), and
+`npx oxlint src` (0 errors) all clean.
+
