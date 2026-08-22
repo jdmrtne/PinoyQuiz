@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CATEGORY_GROUPS,
   CATEGORY_LABELS,
   CATEGORY_OPTIONS,
   DIFFICULTY_LABELS,
@@ -81,5 +82,25 @@ describe("gameOptions data integrity", () => {
 
   it("always includes LOCK_ON_SELECTION as an answer behavior option (the pre-existing default)", () => {
     expect(ANSWER_BEHAVIOR_OPTIONS).toContain("LOCK_ON_SELECTION");
+  });
+
+  // Phase 14: CreateGame renders CATEGORY_GROUPS instead of a flat
+  // CATEGORY_OPTIONS list once the category count grew past 8. These tests
+  // catch the two ways that grouping can silently drift from the source of
+  // truth (CATEGORY_LABELS): a new category added to CATEGORY_LABELS but
+  // forgotten in CATEGORY_GROUPS (invisible in the UI), or a stray/renamed
+  // option left in a group after a label is removed (crashes the pill's
+  // label lookup at render time).
+  it("CATEGORY_GROUPS contains every category option exactly once, with no unknown options", () => {
+    const grouped = CATEGORY_GROUPS.flatMap((g) => g.options);
+    expect(new Set(grouped)).toEqual(new Set(CATEGORY_OPTIONS));
+    expect(grouped.length).toBe(CATEGORY_OPTIONS.length);
+  });
+
+  it("every CATEGORY_GROUPS entry has a non-blank label and at least one option", () => {
+    for (const group of CATEGORY_GROUPS) {
+      expect(group.label.trim().length).toBeGreaterThan(0);
+      expect(group.options.length).toBeGreaterThan(0);
+    }
   });
 });

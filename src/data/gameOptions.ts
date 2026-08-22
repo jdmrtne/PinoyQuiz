@@ -15,11 +15,63 @@ export const CATEGORY_LABELS: Record<GameCategorySetting, string> = {
   sports: "Philippine Sports",
   trivia: "Trivia",
   slang: "Slang & Language",
+  // Added Phase 14 (supabase/migrations/0018_expand_categories.sql).
+  politics_government: "Politics & Government",
+  provinces_cities: "Provinces & Cities",
+  languages: "Languages",
+  literature: "Literature",
+  music: "Music",
+  movies_tv: "Movies & TV",
+  celebrities: "Celebrities",
+  festivals: "Festivals",
+  mythology_folklore: "Mythology & Folklore",
+  nature_wildlife: "Nature & Wildlife",
+  landmarks: "Landmarks",
+  innovations: "Inventions & Innovations",
+  economy_business: "Economy & Business",
+  technology: "Filipino Technology",
+  religion_traditions: "Religion & Traditions",
 };
 
 export const CATEGORY_OPTIONS = Object.keys(
   CATEGORY_LABELS
 ) as GameCategorySetting[];
+
+// CreateGame renders CATEGORY_OPTIONS as a flat SelectPills group (see
+// src/pages/CreateGame.tsx). With 23 real categories + "Random", a flat
+// grid is still scannable on desktop, but Phase 14 grouped it into
+// labeled clusters for mobile — see CATEGORY_GROUPS below and its use in
+// CreateGame.tsx's "Category" section.
+export const CATEGORY_GROUPS: { label: string; options: GameCategorySetting[] }[] = [
+  { label: "General", options: ["random", "trivia", "history", "geography"] },
+  {
+    label: "Culture & Life",
+    options: [
+      "culture",
+      "food",
+      "religion_traditions",
+      "festivals",
+      "mythology_folklore",
+      "languages",
+      "slang",
+    ],
+  },
+  {
+    label: "Arts & Entertainment",
+    options: ["entertainment", "movies_tv", "music", "literature", "celebrities"],
+  },
+  {
+    label: "Places & Society",
+    options: [
+      "provinces_cities",
+      "landmarks",
+      "nature_wildlife",
+      "politics_government",
+      "economy_business",
+    ],
+  },
+  { label: "Sports & Innovation", options: ["sports", "innovations", "technology"] },
+];
 
 export const DIFFICULTY_LABELS: Record<GameDifficultySetting, string> = {
   mixed: "Mixed",

@@ -6,13 +6,19 @@ technical design and per-phase implementation detail, see
 [docs/ARCHITECTURE.md](ARCHITECTURE.md); for a chronological log of every
 change and how it was tested, see [../CHANGELOG.md](../CHANGELOG.md).
 
-## Current state: Phase 13 complete ✅
+## Current state: Phase 13 complete ✅, plus Phase 15 done out of order ✅
 
 **Phases 1–13 are done and validated.** Everything from Phase 12 (below)
-still holds, plus — new this phase — "Play Again" is a real rematch in the
+still holds, plus — new that phase — "Play Again" is a real rematch in the
 same room instead of a link to a brand-new one, and repeated games in the
 same room no longer draw the same questions until the available pool is
 actually exhausted.
+
+**Phase 15 (expand question bank + categories) has also been completed**,
+out of its normal place in the sequence, at explicit request — see
+"What Phase 15 actually built" below. **Phase 14 (production deployment)
+is still the next unstarted phase** and remains next in sequence for
+whoever picks this up.
 
 Phase 13 (Play Again + no repeat questions) added:
 
@@ -194,7 +200,7 @@ changes.
 | 2 | Database schema + Supabase config | ✅ Done |
 | 3 | Create/join room system | ✅ Done |
 | 4 | Multiplayer lobby + realtime sync | ✅ Done |
-| 5 | Question system + game engine | ✅ Done (partial question bank — 80/240) |
+| 5 | Question system + game engine | ✅ Done |
 | 6 | Answer submission + scoring | ✅ Done |
 | 7 | Leaderboard + final results | ✅ Done |
 | 8 | Disconnect/reconnect handling | ✅ Done |
@@ -204,7 +210,60 @@ changes.
 | 12 | Automatic Mode + Configurable Answer Behavior | ✅ Done |
 | 13 | Play Again (rematch in same room) + no repeat questions | ✅ Done |
 | 14 | Production deployment | ⬜ **Next task** |
-| 15 | Expand question bank to 240 | ⬜ Not started (deferred from Phase 5) |
+| 15 | Expand question bank + categories | ✅ Done (out of order — see below) |
+
+## What Phase 15 actually built (so you don't re-derive it)
+
+- `supabase/migrations/0018_expand_categories.sql` — adds 15 new values
+  to both `game_category_setting` and `question_category` (`ALTER TYPE
+  ... ADD VALUE IF NOT EXISTS`, idempotent). Its own migration, not
+  combined with the question inserts, because Postgres won't let a
+  newly-added enum value be referenced by the same transaction that added
+  it, and Supabase applies each migration file as one transaction.
+- `supabase/migrations/0019_new_categories_and_questions.sql` — 200 new
+  questions (10 each × 15 new categories, + a 50-question top-up of the
+  original 8). Every row uses `INSERT ... SELECT ... WHERE NOT EXISTS`
+  keyed on `(category, prompt)`, so it's safe to re-run. None of the
+  existing 80 seed questions were touched, and neither migration touches
+  `game_mode`/`answer_behavior`/`round_number` or anything else from
+  Phase 12/13.
+- `src/types/database.types.ts` — 15 new `GameCategorySetting` values,
+  added alongside (not replacing) Phase 12's `GameModeRow`/
+  `AnswerBehaviorRow`.
+- `src/data/gameOptions.ts` — labels for the 15 new categories in
+  `CATEGORY_LABELS` (still the only source of truth; `CATEGORY_OPTIONS`
+  is still derived from it, nothing hard-coded elsewhere), plus a new
+  `CATEGORY_GROUPS` export clustering all 23 categories + Random into 5
+  labeled sections for the picker UI. Phase 12's `GAME_MODE_*`/
+  `ANSWER_BEHAVIOR_*` exports are unchanged.
+- `src/pages/CreateGame.tsx` — the "Category" section renders
+  `CATEGORY_GROUPS` as multiple labeled `SelectPills` groups instead of
+  one flat 24-pill list. Same component, same visual style. The Game
+  Mode / Answer Behavior sections added in Phase 12 are untouched.
+- `src/data/gameOptions.test.ts` — two new tests asserting
+  `CATEGORY_GROUPS` stays in sync with `CATEGORY_OPTIONS` (every option
+  present exactly once, no unknowns) and that every group has a label and
+  at least one option, alongside Phase 12's existing game-mode/answer-
+  behavior integrity tests.
+- **No changes were needed to `create_game`/`start_game`/
+  `auto_advance_game`/any other game engine function.** They filter/
+  accept by the enum type, not an enumerated list of its values, so new
+  categories become selectable and playable automatically — in both
+  Host-Controlled and Automatic mode — the moment `0018` lands. Verified
+  directly: created a game with the brand-new `music` category, joined a
+  second player, started it, and confirmed both that it reached
+  `COUNTDOWN` and that every assigned question actually belonged to
+  `music`.
+- Re-ran `supabase/tests/run_scenarios.sql` against the expanded
+  database (280 rows total) — all pre-existing assertions still pass,
+  including Phase 12/13's Automatic Mode, Play Again, and no-repeat-
+  question scenarios.
+
+Full reasoning — including which 5 of the 20 requested category names
+were mapped onto existing enum values instead of duplicated, the exact
+difficulty-distribution numbers, and which specific facts were verified
+via web search before being written into the migration — is in
+`CHANGELOG.md`'s Phase 15 entry.
 
 ## What Phase 13 actually built (so you don't re-derive it)
 
@@ -343,13 +402,13 @@ Don't re-read these in full unless you're actually touching that code —
 this handoff doc's job is to tell you what already exists, not to make
 you re-derive it.
 
-## Next task: Phase 12 — production deployment
+## Next task: Phase 14 — production deployment
 
 `docs/ARCHITECTURE.md`'s roadmap table names this next; as of this
-session it has no Phase-12-specific detail beyond that roadmap line
+session it has no Phase-14-specific detail beyond that roadmap line
 (the same situation every prior phase's handoff flagged for the phase
 after it, before that section got filled in) — search it yourself for
-"Phase 12" to confirm before assuming this list is complete.
+"Phase 14" to confirm before assuming this list is complete.
 
 Concrete things a real "production deployment" phase for this stack
 likely involves, not yet decided or built — treat this as a starting
@@ -364,11 +423,11 @@ checklist to validate/expand, not a finished plan:
    `.env.local` — `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` need to
    be set in whatever CI/deploy environment builds this, sourced from a
    real (not local-test) Supabase project.
-3. **Every migration in `supabase/migrations/` (0001–0016) and the seed
+3. **Every migration in `supabase/migrations/` (0001–0019) and the seed
    file need to actually be applied against that real Supabase project**
-   — this session's testing was all against a disposable local Postgres,
-   never against a real hosted Supabase instance. That's a genuine,
-   still-open gap, not something Phase 11 closed.
+   — every session's testing so far has been against a disposable local
+   Postgres, never against a real hosted Supabase instance. That's a
+   genuine, still-open gap, not something any prior phase closed.
 4. **Realtime, specifically** — `0008_realtime.sql` adds tables to the
    `supabase_realtime` publication; confirm Realtime is actually enabled
    for those tables in the real project's dashboard, not just at the SQL
@@ -381,8 +440,9 @@ checklist to validate/expand, not a finished plan:
    `_redirects`), or deep links like `/game/:roomCode` will 404 on a hard
    refresh. Confirm whichever host is chosen has this configured.
 
-Do not touch the question bank (Phase 14, deliberately deferred — see
-"Things to *not* redo" below).
+Phase 15 (question bank + categories) is now done — see "What Phase 15
+actually built" above. It's no longer something to defer or avoid
+touching; any older note saying otherwise is obsolete.
 
 ## How to test your work (do this — don't just review the SQL)
 
@@ -485,10 +545,12 @@ produces no CSS.
 
 ## Things to *not* redo
 
-- Don't touch the question bank / seed data size (80 of 240 questions) —
-  that's tracked separately as Phase 14, not part of the current 1-12
-  sequence, and rushing it would violate the accuracy bar documented in
-  Phase 5's CHANGELOG entry.
+- Don't re-run the Phase 15 question-bank expansion — it's done (280
+  questions across 23 categories; see "What Phase 15 actually built"
+  above and CHANGELOG.md's Phase 15 entry). If more categories or
+  questions are wanted later, extend `CATEGORY_LABELS`/`CATEGORY_GROUPS`
+  and add a new numbered migration in the same `NOT EXISTS`-guarded
+  pattern as `0019` rather than editing `0018`/`0019` in place.
 - Don't rebuild Realtime, RLS, the create/join functions, the
   WAITING→COUNTDOWN→QUESTION→REVEAL→LEADERBOARD→(QUESTION|FINISHED)
   transitions, the heartbeat/staleness/host-transfer mechanics from
@@ -518,6 +580,7 @@ produces no CSS.
   to pure-logic-only (`environment: "node"`) because there was no pure
   component logic worth isolating yet; see CHANGELOG's Phase 11 entry
   for the reasoning if that calculus changes.
-- Don't skip ahead to Phase 14 (question bank expansion) instead of
-  Phase 12 (production deployment) — 12 is the immediate next task, per
-  the numbered sequence this project has followed since Phase 1.
+- Phase 15 (question bank expansion) is now done, out of its normal
+  place in the sequence, at explicit request. Phase 14 (production
+  deployment) is once again the immediate next task — don't skip ahead
+  to some other later phase without a similarly explicit reason.

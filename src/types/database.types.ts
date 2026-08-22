@@ -20,6 +20,23 @@ export type GameCategorySetting =
   | "sports"
   | "trivia"
   | "slang"
+  // Added Phase 14 (supabase/migrations/0018_expand_categories.sql) — 15
+  // new Philippines-focused categories on top of the original 8 above.
+  | "politics_government"
+  | "provinces_cities"
+  | "languages"
+  | "literature"
+  | "music"
+  | "movies_tv"
+  | "celebrities"
+  | "festivals"
+  | "mythology_folklore"
+  | "nature_wildlife"
+  | "landmarks"
+  | "innovations"
+  | "economy_business"
+  | "technology"
+  | "religion_traditions"
   | "random";
 
 export type QuestionCategoryRow = Exclude<GameCategorySetting, "random">;

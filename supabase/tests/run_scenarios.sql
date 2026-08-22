@@ -684,10 +684,12 @@ end $$;
 -- across rounds of the same room, and only falls back to repeats once
 -- that pool is actually exhausted — never errors either way.
 --
--- Uses the seed's trivia/easy pool, which has exactly 4 questions, with
--- question_count = 2 per round:
---   round 1: draws 2 of the 4 (2 remain fresh)
---   round 2: exactly 2 fresh remain — must be disjoint from round 1
+-- Uses the seed's trivia/easy pool with question_count set to exactly
+-- half the pool's current size (computed dynamically, not hardcoded —
+-- Phase 15 grew this pool from 4 to 6, and it may grow again later):
+--   round 1: draws half the pool (half remain fresh)
+--   round 2: exactly the other half remain fresh — must be disjoint
+--            from round 1
 --   round 3: 0 fresh remain — forced to repeat, but must not error
 -- ---------------------------------------------------------------------
 do $$
@@ -699,39 +701,39 @@ declare
   v_round2_ids uuid[];
   v_round3_ids uuid[];
   v_pool_size int;
+  v_round_count smallint;
 begin
   select count(*) into v_pool_size from questions where category = 'trivia' and difficulty = 'easy';
-  perform test_assert(v_pool_size = 4, 'scenario15: setup — the seed''s trivia/easy pool is exactly 4 questions (test assumption)');
+  perform test_assert(v_pool_size >= 4 and v_pool_size % 2 = 0, 'scenario15: setup — the trivia/easy pool is a non-trivial, evenly-divisible size (test assumption)');
+  v_round_count := (v_pool_size / 2)::smallint;
 
   insert into auth.users default values returning id into v_uid;
   perform set_config('request.jwt.claim.sub', v_uid::text, false);
   select out_game_id, out_room_code into v_game_id, v_room_code
-    from create_game('trivia', 'easy', 2::smallint, 30::smallint, 'RepeatHost');
+    from create_game('trivia', 'easy', v_round_count, 30::smallint, 'RepeatHost');
 
   -- Round 1.
   perform start_game(v_game_id);
   select array_agg(question_id) into v_round1_ids
     from game_questions where game_id = v_game_id and round_number = 1;
-  perform test_assert(array_length(v_round1_ids, 1) = 2, 'scenario15: round 1 drew 2 questions');
+  perform test_assert(array_length(v_round1_ids, 1) = v_round_count, 'scenario15: round 1 drew half the pool');
 
   perform begin_first_question(v_game_id);
-  perform submit_answer(v_game_id, 0::smallint);
-  perform end_question(v_game_id);
-  perform advance_to_leaderboard(v_game_id);
-  perform advance_question(v_game_id);
-  perform submit_answer(v_game_id, 0::smallint);
-  perform end_question(v_game_id);
-  perform advance_to_leaderboard(v_game_id);
-  perform advance_question(v_game_id);
+  for i in 1..v_round_count loop
+    perform submit_answer(v_game_id, 0::smallint);
+    perform end_question(v_game_id);
+    perform advance_to_leaderboard(v_game_id);
+    perform advance_question(v_game_id);
+  end loop;
   perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario15: setup — round 1 finished');
 
-  -- Round 2 — exactly the 2 remaining fresh questions are available;
-  -- must be entirely disjoint from round 1.
+  -- Round 2 — exactly the remaining fresh half is available; must be
+  -- entirely disjoint from round 1.
   perform play_again(v_game_id);
   perform start_game(v_game_id);
   select array_agg(question_id) into v_round2_ids
     from game_questions where game_id = v_game_id and round_number = 2;
-  perform test_assert(array_length(v_round2_ids, 1) = 2, 'scenario15: round 2 drew 2 questions');
+  perform test_assert(array_length(v_round2_ids, 1) = v_round_count, 'scenario15: round 2 drew half the pool');
   perform test_assert(
     not exists (select 1 from unnest(v_round2_ids) x where x = any(v_round1_ids)),
     'scenario15: round 2 has zero overlap with round 1 while fresh questions remain'
@@ -739,23 +741,21 @@ begin
 
   -- Finish round 2 so play_again is allowed again.
   perform begin_first_question(v_game_id);
-  perform submit_answer(v_game_id, 0::smallint);
-  perform end_question(v_game_id);
-  perform advance_to_leaderboard(v_game_id);
-  perform advance_question(v_game_id);
-  perform submit_answer(v_game_id, 0::smallint);
-  perform end_question(v_game_id);
-  perform advance_to_leaderboard(v_game_id);
-  perform advance_question(v_game_id);
+  for i in 1..v_round_count loop
+    perform submit_answer(v_game_id, 0::smallint);
+    perform end_question(v_game_id);
+    perform advance_to_leaderboard(v_game_id);
+    perform advance_question(v_game_id);
+  end loop;
   perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario15: setup — round 2 finished');
 
-  -- Round 3 — the entire 4-question pool has now been used across rounds
-  -- 1 and 2, so this MUST fall back to repeating, and must NOT error.
+  -- Round 3 — the entire pool has now been used across rounds 1 and 2,
+  -- so this MUST fall back to repeating, and must NOT error.
   perform play_again(v_game_id);
   perform start_game(v_game_id);
   select array_agg(question_id) into v_round3_ids
     from game_questions where game_id = v_game_id and round_number = 3;
-  perform test_assert(array_length(v_round3_ids, 1) = 2, 'scenario15: round 3 still drew a full 2 questions (fallback to repeats, not an error)');
+  perform test_assert(array_length(v_round3_ids, 1) = v_round_count, 'scenario15: round 3 still drew a full half-pool (fallback to repeats, not an error)');
   perform test_assert(
     exists (select 1 from unnest(v_round3_ids) x where x = any(v_round1_ids) or x = any(v_round2_ids)),
     'scenario15: round 3 was forced to repeat a question only once the fresh pool was fully exhausted'
@@ -795,7 +795,7 @@ begin
   perform advance_question(v_game_id);
   perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario16: setup — round 1 finished');
 
-  -- With only 4 slang/easy questions and question_count=1, round 2 and
+  -- With a small slang/easy pool and question_count=1, round 2 and
   -- round 3 exhaust the fresh pool quickly enough that a repeat of
   -- v_round1_question is likely within a couple of rounds; force it
   -- deterministically for the test instead of depending on random().

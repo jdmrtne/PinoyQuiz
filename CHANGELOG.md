@@ -1326,3 +1326,115 @@ future change can't silently regress this back toward "too slow" without
 a test failing. `npm run build`, `npm run test` (22/22), and
 `npx oxlint src` (0 errors) all clean.
 
+## Phase 15 — Expand question bank + categories ✅
+
+Done out of sequence, ahead of Phase 14 (production deployment), at
+explicit request — merged on top of Phase 12/13's Automatic Mode, Play
+Again, and timing tune-up work rather than the branch it was originally
+built against, so migration numbers below reflect the merged position
+(0018/0019, not their original 0015/0016).
+
+**Completed:**
+- Added 15 new categories to both `game_category_setting` and
+  `question_category` enums in
+  `supabase/migrations/0018_expand_categories.sql`: `politics_government`,
+  `provinces_cities`, `languages`, `literature`, `music`, `movies_tv`,
+  `celebrities`, `festivals`, `mythology_folklore`, `nature_wildlife`,
+  `landmarks`, `innovations`, `economy_business`, `technology`,
+  `religion_traditions`.
+- Of the 20 categories originally requested, 5 already existed under a
+  different (already Philippines-scoped) name and were **not**
+  duplicated — new questions for those went to the existing enum value
+  instead:
+  - "Philippine History" → existing `history`
+  - "Filipino Food & Cuisine" → existing `food`
+  - "Filipino Sports" → existing `sports`
+  - "Filipino Slang & Expressions" → existing `slang`
+  - "General Philippines Trivia" → existing `trivia`
+- Added 200 new questions in
+  `supabase/migrations/0019_new_categories_and_questions.sql`: 10 each
+  across the 15 new categories (150 total), plus a 50-question top-up
+  spread across the 8 original categories (history +6, geography +6,
+  culture +6, food +7, entertainment +6, sports +6, trivia +6, slang +7).
+  Difficulty split: 78 easy / 85 medium / 37 hard (target was ~35/45/20;
+  landed close to it, slightly heavier on medium/lighter on hard than the
+  recommendation, which the spec treated as a guideline rather than a
+  hard requirement).
+- Every new row: exactly 4 unique choices, exactly 1 correct answer, and
+  an explanation. Inserted via `INSERT ... SELECT ... WHERE NOT EXISTS`
+  guards keyed on `(category, prompt)`, so the migration is safe to
+  re-run.
+- Did **not** modify, delete, or duplicate any of the 80 questions in
+  `supabase/seed/0001_sample_questions.sql`, and did **not** touch any
+  of Phase 12/13's Automatic Mode, Play Again, or timing-tuning work —
+  this phase is additive only.
+- Fact-checked the riskiest/least-certain claims via web search before
+  writing them into the migration rather than trusting memory alone
+  (e.g. the composer of "Bayan Ko", Brillante Mendoza's 2009 Cannes Best
+  Director win for *Kinatay*, *Insiang* being the first Filipino film
+  shown at Cannes, Eugenio Torre's 1974 Grandmaster title, Roberto del
+  Rosario's karaoke-machine patent). Where a popular claim is genuinely
+  contested (e.g. exactly who "invented karaoke", or the precise extent
+  of Eduardo San Juan's NASA lunar-rover contribution), questions were
+  worded to reflect what's *popularly credited* rather than asserting a
+  disputed fact outright.
+
+**Validated by testing, not just review:**
+- A Python validation pass over all 200 drafted questions confirmed: 0
+  structural errors (choice count/uniqueness, valid difficulty, valid
+  correct-answer letter, non-empty explanation), 0 duplicate prompts
+  among the new questions, and 0 prompt overlap with the existing 80
+  seed questions.
+- Applied every migration `0001` through `0019` plus the seed file, in
+  order, against a disposable local Postgres — all applied cleanly with
+  `ON_ERROR_STOP=1`, including on top of Phase 12/13's `game_mode`/
+  `answer_behavior`/`round_number` schema changes and `0017`'s timing
+  retune.
+- Confirmed `select count(*) from questions` = 280 (80 existing + 200
+  new), with all 23 categories represented at every difficulty level.
+- Re-ran `supabase/tests/run_scenarios.sql` (now 17 scenarios / 88
+  assertions, after Phase 12/13/timing-tuneup's additions) against the
+  expanded database — **all 88 assertions still pass**, confirming this
+  phase's additions don't interfere with Automatic Mode, Play Again, or
+  the no-repeat-question logic.
+- Ran a new ad hoc end-to-end check: called `create_game` with the
+  brand-new `music` category, joined a second player, started it, and
+  confirmed both that it reached `COUNTDOWN` and that every assigned
+  question actually belonged to `music`. No changes were needed to
+  `create_game`/`start_game`/`auto_advance_game` — they filter/accept by
+  the enum type itself, not an enumerated list of values, so new
+  categories are automatically playable in both Host-Controlled and
+  Automatic mode the moment `0018` lands.
+
+**Frontend:**
+- `src/types/database.types.ts` — added the 15 new values to
+  `GameCategorySetting`, alongside (not replacing) Phase 12's
+  `GameModeRow`/`AnswerBehaviorRow` additions.
+- `src/data/gameOptions.ts` — added labels for the 15 new categories to
+  `CATEGORY_LABELS` (still the single source of truth `CATEGORY_OPTIONS`
+  derives from), and a new `CATEGORY_GROUPS` export clustering all 23
+  categories + Random into 5 labeled sections. Phase 12's
+  `GAME_MODE_*`/`ANSWER_BEHAVIOR_*` exports are untouched.
+- `src/pages/CreateGame.tsx` — the "Category" section now renders
+  `CATEGORY_GROUPS` as multiple labeled `SelectPills` groups instead of
+  one flat 24-pill list; same component, same visual style. The Game
+  Mode and Answer Behavior sections added in Phase 12 are unchanged.
+- `src/data/gameOptions.test.ts` — added two tests asserting
+  `CATEGORY_GROUPS` stays in sync with `CATEGORY_OPTIONS` (every option
+  present exactly once, no unknowns) and that every group has a label
+  and at least one option, alongside Phase 12's existing game-mode/
+  answer-behavior integrity tests.
+- `npx tsc -b && vite build`: clean, zero errors. `npm run test`: 22/22
+  pass (all pre-existing, unchanged — this phase added no new pure-logic
+  surface needing a Vitest case beyond the 2 already listed above).
+  `npx oxlint src`: no new errors or warnings introduced by any file this
+  phase touched.
+
+**Not included in this phase (by design, per the request's scope):**
+- No redesign of the category selector's visual style — grouping only.
+- No changes to scoring, timers, Automatic Mode pacing, or Play Again
+  behavior.
+- No production deployment work (still Phase 14, next in sequence).
+
+**Next phase:** Phase 14 — production deployment.
+

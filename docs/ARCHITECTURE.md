@@ -15,7 +15,7 @@ today.
 | 2 | Database schema + Supabase config | ✅ Done |
 | 3 | Create/join room system | ✅ Done |
 | 4 | Multiplayer lobby + realtime sync | ✅ Done |
-| 5 | Question system + game engine | ✅ Done (partial question bank) |
+| 5 | Question system + game engine | ✅ Done |
 | 6 | Answer submission + scoring | ✅ Done |
 | 7 | Leaderboard + final results | ✅ Done |
 | 8 | Disconnect/reconnect handling | ✅ Done |
@@ -25,9 +25,13 @@ today.
 | 12 | Automatic Mode + Configurable Answer Behavior | ✅ Done |
 | 13 | Play Again (rematch in same room) + no repeat questions | ✅ Done |
 | 14 | Production deployment | ⬜ Not started |
+| 15 | Expand question bank + categories | ✅ Done (out of order — see below) |
 
-Work happens one phase at a time. Do not start a phase's code until the
-previous one is tested and documented.
+Work normally happens one phase at a time, in order. Phase 15 is the one
+exception so far: it was explicitly requested and completed before Phase
+14, ahead of its place in this table. Phase 14 (production deployment)
+remains the next phase in sequence for whoever picks this up next. Do not
+start a phase's code until the previous one is tested and documented.
 
 ## Frontend architecture
 
@@ -861,3 +865,55 @@ across rounds, per-round settings editing, live Realtime-wire
 verification) are in `CHANGELOG.md`'s Phase 13 entry.
 
 Next up: **Phase 14 — production deployment**.
+
+## Phase 15 — Expand question bank + categories (done, out of order)
+
+Done ahead of Phase 14 at explicit request. Merged on top of Phase 12/13's
+Automatic Mode, Play Again, and `0017`'s timing tune-up rather than the
+branch it was originally developed against, hence the migration numbers
+(`0018`/`0019`) not lining up with the "Phase 15" label.
+
+**Design, in short:** 15 new values were added to both
+`game_category_setting` (the game-creation setting enum) and
+`question_category` (the per-question enum) in
+`0018_expand_categories.sql`, as its own migration file separate from the
+question inserts — Postgres won't let a transaction reference an enum
+value it just added in the same transaction, and each migration file runs
+as one transaction. `0019_new_categories_and_questions.sql` then adds 200
+new questions (`INSERT ... SELECT ... WHERE NOT EXISTS`, idempotent),
+split 150 across the 15 new categories and 50 as a top-up of the original
+8. Of the 20 category names originally requested, 5 mapped onto an
+existing enum value under a different label (e.g. "Philippine History" →
+the existing `history`) rather than being duplicated.
+
+**No game-engine changes were needed at all** — `create_game`,
+`start_game`, and `auto_advance_game` all filter/accept by the enum
+*type*, not an enumerated list of its values, so the 15 new categories
+became selectable and playable — in both Host-Controlled and Automatic
+mode — the instant `0018` committed. Verified directly: created a game
+with the brand-new `music` category, joined a second player, started it,
+and confirmed it reached `COUNTDOWN` with every assigned question
+actually belonging to `music`.
+
+On the frontend, `CATEGORY_LABELS` (the single source of truth
+`CATEGORY_OPTIONS` is derived from) gained the 15 new labels, and a new
+`CATEGORY_GROUPS` export clusters all 23 categories + Random into 5
+labeled sections so `CreateGame`'s category picker doesn't become an
+unscannable 24-pill wall. Phase 12's Game Mode / Answer Behavior sections
+on that same screen are untouched.
+
+**Testing**: re-ran the full pre-existing 88-assertion `run_scenarios.sql`
+suite unmodified against the expanded (280-question) database — all 88
+still pass. A separate Python validation pass over the 200 drafted
+questions confirmed 0 structural errors, 0 duplicate prompts, and 0
+overlap with the existing 80 seed questions. `npm run build` and
+`npm run test` both clean; no new `oxlint` warnings or errors in any file
+this phase touched.
+
+The complete category-name mapping, the exact difficulty-distribution
+numbers, and which specific trivia facts were verified via web search
+before being written into the migration are in `CHANGELOG.md`'s Phase 15
+entry — read that instead of re-deriving the same question bank from
+scratch.
+
+Next up (still): **Phase 14 — production deployment**.

@@ -5,8 +5,8 @@ import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/TextField";
 import { SelectPills } from "../components/ui/SelectPills";
 import {
+  CATEGORY_GROUPS,
   CATEGORY_LABELS,
-  CATEGORY_OPTIONS,
   DIFFICULTY_LABELS,
   DIFFICULTY_OPTIONS,
   QUESTION_COUNT_OPTIONS,
@@ -94,16 +94,28 @@ export default function CreateGame() {
               autoFocus
             />
 
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-4">
               <span className="text-sm font-semibold text-sampaguita/80">
                 Category
               </span>
-              <SelectPills
-                options={CATEGORY_OPTIONS}
-                value={category}
-                onChange={setCategory}
-                labels={CATEGORY_LABELS}
-              />
+              {/* Phase 14: 23 categories + Random is too many for one flat
+                  pill group on a small screen, so they're clustered into
+                  labeled sections (CATEGORY_GROUPS in data/gameOptions.ts)
+                  while reusing the same SelectPills component/visual style
+                  per group. */}
+              {CATEGORY_GROUPS.map((group) => (
+                <div key={group.label} className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-sampaguita/40">
+                    {group.label}
+                  </span>
+                  <SelectPills
+                    options={group.options}
+                    value={category}
+                    onChange={setCategory}
+                    labels={CATEGORY_LABELS}
+                  />
+                </div>
+              ))}
             </div>
 
             <div className="flex flex-col gap-2">
