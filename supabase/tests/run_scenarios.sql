@@ -588,6 +588,238 @@ begin
   perform test_assert(v_raised, 'scenario13: the real-elapsed-time cutoff actually fired');
 end $$;
 
+-- ---------------------------------------------------------------------
+-- Scenario 14 (0016): play_again resets the SAME room for a rematch —
+-- same games.id, same room_code, same players (nicknames/host untouched),
+-- fresh round_number, scores back to 0 — and is properly permission- and
+-- status-gated.
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_host_uid uuid;
+  v_other_uid uuid;
+  v_game_id uuid;
+  v_room_code text;
+  v_host_player_id uuid;
+  v_other_player_id uuid;
+  v_room_code_after text;
+  v_raised boolean := false;
+begin
+  insert into auth.users default values returning id into v_host_uid;
+  insert into auth.users default values returning id into v_other_uid;
+
+  perform set_config('request.jwt.claim.sub', v_host_uid::text, false);
+  select out_game_id, out_room_code, out_player_id into v_game_id, v_room_code, v_host_player_id
+    from create_game('trivia', 'easy', 1::smallint, 30::smallint, 'RematchHost');
+
+  perform set_config('request.jwt.claim.sub', v_other_uid::text, false);
+  select out_player_id into v_other_player_id from join_game(v_room_code, 'RematchGuest');
+
+  -- play_again before FINISHED must be rejected.
+  perform set_config('request.jwt.claim.sub', v_host_uid::text, false);
+  begin
+    perform play_again(v_game_id);
+  exception when others then
+    v_raised := true;
+  end;
+  perform test_assert(v_raised, 'scenario14: play_again is rejected before the game has finished');
+
+  -- Play the single question through to FINISHED.
+  perform start_game(v_game_id);
+  perform begin_first_question(v_game_id);
+  perform submit_answer(v_game_id, 0::smallint);
+  perform end_question(v_game_id);
+  perform advance_to_leaderboard(v_game_id);
+  perform advance_question(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario14: setup — game reached FINISHED');
+
+  -- Non-host play_again must be rejected.
+  v_raised := false;
+  perform set_config('request.jwt.claim.sub', v_other_uid::text, false);
+  begin
+    perform play_again(v_game_id);
+  exception when others then
+    v_raised := true;
+  end;
+  perform test_assert(v_raised, 'scenario14: only the host can call play_again');
+
+  perform set_config('request.jwt.claim.sub', v_host_uid::text, false);
+  perform play_again(v_game_id);
+
+  select room_code into v_room_code_after from games where id = v_game_id;
+  perform test_assert(v_room_code_after = v_room_code, 'scenario14: play_again keeps the exact same room_code — no new room, no new invite link');
+  perform test_assert((select status from games where id = v_game_id) = 'WAITING', 'scenario14: play_again resets status back to WAITING (the lobby)');
+  perform test_assert((select round_number from games where id = v_game_id) = 2, 'scenario14: play_again advances round_number');
+  perform test_assert((select finished_at from games where id = v_game_id) is null, 'scenario14: finished_at is cleared for the new round');
+  perform test_assert(
+    (select nickname from players where id = v_host_player_id) = 'RematchHost'
+      and (select nickname from players where id = v_other_player_id) = 'RematchGuest',
+    'scenario14: both players'' nicknames are untouched — no rejoin, no re-typed name'
+  );
+  perform test_assert(
+    (select is_host from players where id = v_host_player_id) = true,
+    'scenario14: the host is still the host after a rematch'
+  );
+  perform test_assert(
+    (select score from players where id = v_host_player_id) = 0
+      and (select score from players where id = v_other_player_id) = 0,
+    'scenario14: scores reset to 0 for the new round'
+  );
+  perform test_assert(
+    (select count(*) from players where game_id = v_game_id) = 2,
+    'scenario14: no players rows were added or removed by play_again'
+  );
+
+  -- The host can immediately start round 2 in the same room.
+  perform start_game(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'COUNTDOWN', 'scenario14: start_game works again for round 2, same room');
+  perform test_assert(
+    (select round_number from game_questions where game_id = v_game_id and question_order = 0 and round_number = 2) is not null,
+    'scenario14: round 2''s game_questions are tagged with round_number = 2'
+  );
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Scenario 15 (0016): start_game prefers never-before-used questions
+-- across rounds of the same room, and only falls back to repeats once
+-- that pool is actually exhausted — never errors either way.
+--
+-- Uses the seed's trivia/easy pool, which has exactly 4 questions, with
+-- question_count = 2 per round:
+--   round 1: draws 2 of the 4 (2 remain fresh)
+--   round 2: exactly 2 fresh remain — must be disjoint from round 1
+--   round 3: 0 fresh remain — forced to repeat, but must not error
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_uid uuid;
+  v_game_id uuid;
+  v_room_code text;
+  v_round1_ids uuid[];
+  v_round2_ids uuid[];
+  v_round3_ids uuid[];
+  v_pool_size int;
+begin
+  select count(*) into v_pool_size from questions where category = 'trivia' and difficulty = 'easy';
+  perform test_assert(v_pool_size = 4, 'scenario15: setup — the seed''s trivia/easy pool is exactly 4 questions (test assumption)');
+
+  insert into auth.users default values returning id into v_uid;
+  perform set_config('request.jwt.claim.sub', v_uid::text, false);
+  select out_game_id, out_room_code into v_game_id, v_room_code
+    from create_game('trivia', 'easy', 2::smallint, 30::smallint, 'RepeatHost');
+
+  -- Round 1.
+  perform start_game(v_game_id);
+  select array_agg(question_id) into v_round1_ids
+    from game_questions where game_id = v_game_id and round_number = 1;
+  perform test_assert(array_length(v_round1_ids, 1) = 2, 'scenario15: round 1 drew 2 questions');
+
+  perform begin_first_question(v_game_id);
+  perform submit_answer(v_game_id, 0::smallint);
+  perform end_question(v_game_id);
+  perform advance_to_leaderboard(v_game_id);
+  perform advance_question(v_game_id);
+  perform submit_answer(v_game_id, 0::smallint);
+  perform end_question(v_game_id);
+  perform advance_to_leaderboard(v_game_id);
+  perform advance_question(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario15: setup — round 1 finished');
+
+  -- Round 2 — exactly the 2 remaining fresh questions are available;
+  -- must be entirely disjoint from round 1.
+  perform play_again(v_game_id);
+  perform start_game(v_game_id);
+  select array_agg(question_id) into v_round2_ids
+    from game_questions where game_id = v_game_id and round_number = 2;
+  perform test_assert(array_length(v_round2_ids, 1) = 2, 'scenario15: round 2 drew 2 questions');
+  perform test_assert(
+    not exists (select 1 from unnest(v_round2_ids) x where x = any(v_round1_ids)),
+    'scenario15: round 2 has zero overlap with round 1 while fresh questions remain'
+  );
+
+  -- Finish round 2 so play_again is allowed again.
+  perform begin_first_question(v_game_id);
+  perform submit_answer(v_game_id, 0::smallint);
+  perform end_question(v_game_id);
+  perform advance_to_leaderboard(v_game_id);
+  perform advance_question(v_game_id);
+  perform submit_answer(v_game_id, 0::smallint);
+  perform end_question(v_game_id);
+  perform advance_to_leaderboard(v_game_id);
+  perform advance_question(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario15: setup — round 2 finished');
+
+  -- Round 3 — the entire 4-question pool has now been used across rounds
+  -- 1 and 2, so this MUST fall back to repeating, and must NOT error.
+  perform play_again(v_game_id);
+  perform start_game(v_game_id);
+  select array_agg(question_id) into v_round3_ids
+    from game_questions where game_id = v_game_id and round_number = 3;
+  perform test_assert(array_length(v_round3_ids, 1) = 2, 'scenario15: round 3 still drew a full 2 questions (fallback to repeats, not an error)');
+  perform test_assert(
+    exists (select 1 from unnest(v_round3_ids) x where x = any(v_round1_ids) or x = any(v_round2_ids)),
+    'scenario15: round 3 was forced to repeat a question only once the fresh pool was fully exhausted'
+  );
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Scenario 16 (0016): a question repeating across rounds doesn't corrupt
+-- scoring or the "already answered" check — round_number scoping on
+-- answers keeps round 3's answer to a repeated question independent of
+-- whatever that same question scored back in round 1.
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_uid uuid;
+  v_game_id uuid;
+  v_player_id uuid;
+  v_room_code text;
+  v_round1_question uuid;
+  v_round3_question uuid;
+  v_raised boolean := false;
+begin
+  insert into auth.users default values returning id into v_uid;
+  perform set_config('request.jwt.claim.sub', v_uid::text, false);
+  select out_game_id, out_room_code, out_player_id into v_game_id, v_room_code, v_player_id
+    from create_game('slang', 'easy', 1::smallint, 30::smallint, 'RepeatScorer');
+
+  -- Round 1: answer correctly (option 0 may or may not be correct — what
+  -- matters here is that SOME points get recorded against this question).
+  perform start_game(v_game_id);
+  select question_id into v_round1_question from game_questions
+    where game_id = v_game_id and round_number = 1 and question_order = 0;
+  perform begin_first_question(v_game_id);
+  perform submit_answer(v_game_id, 0::smallint);
+  perform end_question(v_game_id);
+  perform advance_to_leaderboard(v_game_id);
+  perform advance_question(v_game_id);
+  perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario16: setup — round 1 finished');
+
+  -- With only 4 slang/easy questions and question_count=1, round 2 and
+  -- round 3 exhaust the fresh pool quickly enough that a repeat of
+  -- v_round1_question is likely within a couple of rounds; force it
+  -- deterministically for the test instead of depending on random().
+  perform play_again(v_game_id);
+  update game_questions set question_id = v_round1_question
+    where game_id = v_game_id and round_number = 2 and question_order = 0;
+  perform start_game(v_game_id);
+
+  -- Re-answering "the same question" in round 2 must NOT be blocked by
+  -- round 1's answer row (LOCK_ON_SELECTION default — a fresh round is a
+  -- fresh chance to answer, not a continuation of round 1's answer).
+  perform begin_first_question(v_game_id);
+  begin
+    perform submit_answer(v_game_id, 1::smallint);
+  exception when others then
+    v_raised := true;
+  end;
+  perform test_assert(not v_raised, 'scenario16: answering a repeated question in a new round is not blocked by that question''s round-1 answer row');
+  perform test_assert(
+    (select count(*) from answers where game_id = v_game_id and question_id = v_round1_question) = 2,
+    'scenario16: round 1''s and round 2''s answers to the same question_id both exist as separate rows (round-scoped)'
+  );
+end $$;
+
 drop function test_assert(boolean, text);
 
-\echo '=== All Phase 11 + Automatic Mode & Answer Behavior scenarios passed ==='
+\echo '=== All Phase 11 + Automatic Mode & Answer Behavior + Play Again scenarios passed ==='

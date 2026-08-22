@@ -23,7 +23,8 @@ today.
 | 10 | Mobile responsiveness + UI polish | ✅ Done |
 | 11 | Testing + bug fixing | ✅ Done |
 | 12 | Automatic Mode + Configurable Answer Behavior | ✅ Done |
-| 13 | Production deployment | ⬜ Not started |
+| 13 | Play Again (rematch in same room) + no repeat questions | ✅ Done |
+| 14 | Production deployment | ⬜ Not started |
 
 Work happens one phase at a time. Do not start a phase's code until the
 previous one is tested and documented.
@@ -777,4 +778,86 @@ header comment — read that before changing any of this. The complete
 scheduled-job backend, live Realtime-wire verification, component-render
 tests) are in `CHANGELOG.md`'s Phase 12 entry.
 
-Next up: **Phase 13 — production deployment**.
+Next up: **Phase 13 — Play Again (rematch in the same room) + no repeated
+questions**.
+
+## Phase 13 — Play Again + no repeated questions (done)
+
+Bug report: "Play Again" just linked to `/create` — a brand-new room, new
+code, everyone including the host had to rejoin and retype their nickname
+— and a room's questions repeated within a handful of games because
+`start_game`'s random draw had no memory of anything an earlier game in
+that room had already used.
+
+**The room-persistence half.** The natural instinct is "create a new
+`games` row for the rematch" — but `room_code` has a global unique index
+(Phase 2), so a genuinely new row can never carry the old room's code
+forward anyway, and migrating every `players` row over to a new
+`game_id` to fake it would be a much larger, riskier change than this bug
+needs. Instead, `play_again(p_game_id)` resets the *same* `games` row back
+to `WAITING` with an incremented `round_number`, and touches nothing on
+`players` at all. Since `players.game_id` never changes, nicknames, host
+status, and connection state simply carry over — there's no "rejoin"
+step to build because nobody ever left. The existing `start_game` (no
+new host action needed) is what actually kicks off the next round from
+that same lobby, exactly like the first one.
+
+**The repeat-avoidance half.** `games`, `game_questions`, and `answers`
+each gained a `round_number` column (all `not null default 1`, so no
+existing row's meaning changes). `start_game`'s question-selection query
+now excludes every `question_id` already used anywhere in this `game_id`'s
+history before falling back to allowing a repeat — and only then, once
+that "never used in this room" pool is actually exhausted. A game's first
+round has no history yet, so this changes nothing about round-1 behavior;
+it only matters from round 2 onward.
+
+Giving `game_questions`/`answers` a `round_number`-aware identity, rather
+than just filtering `start_game`'s draw, mattered for a subtler reason:
+once the same `question_id` can legitimately appear in two different
+rounds of the same game, every function that reads or writes "the
+answers for the current question" needed to stop assuming
+`(game_id, question_id)` uniquely identifies one answer. `submit_answer`,
+`end_question`, `get_answer_reveal`, and `get_leaderboard` (plus
+`auto_advance_game`'s QUESTION branch, which duplicates `end_question`'s
+logic per Phase 12's design) were all widened to filter/insert by
+`round_number` too — otherwise a question repeating in round 3 would
+collide with its own leftover `answers` row from round 1: a false
+"already answered" rejection under Lock on Selection, the wrong upsert
+target under Change Until Timer Ends, a wrong percent-correct in the
+reveal, a wrong score delta on the leaderboard.
+
+**A related client-side bug**, found while wiring up `Results.tsx`'s new
+"Play Again" button rather than reported directly: two guards in
+`GameRoom.tsx` — the "reset the answer UI for a fresh question" effect
+and the `endQuestionCalledRef` "don't call `end_question` twice for the
+same question" ref — were both keyed on `question.questionId`, which is
+the underlying `questions.id`. That's fine as long as no two questions in
+a game ever share an id, which was true before this phase and is no
+longer true once a question can repeat across rounds. Both were switched
+to `game.current_question_id` instead — the `game_questions` row id,
+which is a fresh UUID every round regardless of whether the underlying
+question repeats. The `endQuestionCalledRef` case was the serious one: a
+`ref.current === value` comparison persists for the life of the
+component, so a repeated question could permanently stop a
+Host-Controlled game's `end_question` from ever firing again once it hit
+a question whose id the ref had already seen, with no error or symptom
+other than the game silently hanging in `QUESTION` forever.
+
+**Testing**: re-ran the full pre-existing 59-assertion suite unmodified
+first to confirm zero regressions, then added scenarios 14–16 (24
+assertions, 83 total) — `play_again`'s permission/status gating and full
+room-preserving reset, a deterministic 3-round repeat-avoidance proof
+using the seed's exactly-4-question trivia/easy pool (round 2 completely
+disjoint from round 1 while fresh questions remain, round 3 forced to
+repeat only once the pool is exhausted, never erroring), and a forced
+repeated-question scoring-correctness check. `npm run build` and
+`npm run test` (22/22) both clean; `npx oxlint src` shows 0 errors.
+
+Full design rationale (in more depth than is useful to duplicate here)
+lives in `0016_play_again_and_no_repeat_questions.sql`'s header comment —
+read that before changing any of this. The complete "validated by
+testing" list and what was deliberately left out (cumulative scoring
+across rounds, per-round settings editing, live Realtime-wire
+verification) are in `CHANGELOG.md`'s Phase 13 entry.
+
+Next up: **Phase 14 — production deployment**.

@@ -322,6 +322,19 @@ export async function autoAdvanceGame(gameId: string): Promise<void> {
   await callRpc("auto_advance_game", { p_game_id: gameId });
 }
 
+/**
+ * Rematch, in place (0016_play_again_and_no_repeat_questions.sql). Host-only,
+ * only once the game has reached FINISHED. Resets the SAME games row/room
+ * to WAITING with a fresh round and every score back to 0 — players table
+ * is never touched, so nobody needs to rejoin or retype their nickname.
+ * The status change reaches every client (host included) through the
+ * existing Realtime subscription; see Results.tsx's navigate-back-to-
+ * GameRoom effect.
+ */
+export async function playAgain(gameId: string): Promise<void> {
+  await callRpc("play_again", { p_game_id: gameId });
+}
+
 export interface JoinGameResult {
   gameId: string;
   playerId: string;

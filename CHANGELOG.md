@@ -1175,3 +1175,124 @@ didn't opt into the new settings, verified directly by Scenarios 10 and
 
 **Next phase:** Phase 13 — production deployment.
 
+## Phase 13 — Play Again (rematch in the same room) + no repeated questions ✅
+
+Bug report: "Play Again" just linked to `/create` — a brand-new room, new
+code, everyone (including the host) had to rejoin and retype their
+nickname — and questions repeated within just a few games because
+`start_game`'s random draw had no memory of what any earlier game had
+already used.
+
+**Completed:**
+- `supabase/migrations/0016_play_again_and_no_repeat_questions.sql`:
+  - New `play_again(p_game_id)` function. Host-only, only once
+    `status = 'FINISHED'`. Resets the **same** `games` row — same `id`,
+    same `room_code` — back to `WAITING` with a new `round_number` and
+    every player's score zeroed. `players` rows are never touched, so
+    nicknames, host status, and connection state all carry over exactly
+    as they were — no rejoin, no new invite link, nothing for anyone to
+    retype. The existing `start_game` (unchanged host action) is what
+    kicks off the next round from that same lobby.
+  - New `games.round_number`, `game_questions.round_number`,
+    `answers.round_number` columns (all `not null default 1`, so every
+    existing row reads as round 1 — no migration of existing data
+    needed). `game_questions`'s and `answers`' uniqueness constraints
+    were widened to include `round_number`, so the exact same question
+    can legitimately reappear in a later round without colliding with its
+    own leftover row from an earlier one.
+  - `start_game` now prefers questions **never used before anywhere in
+    this room's history** (any earlier round of the same `game_id`),
+    only falling back to allowing a repeat once that "never used" pool is
+    actually exhausted — never errors either way. A brand-new game has no
+    history yet, so round 1 behaves exactly as before this migration.
+  - Every function that reads or writes "the current question's" answers
+    (`submit_answer`, `end_question`, `get_answer_reveal`,
+    `get_leaderboard`, and `auto_advance_game`'s QUESTION branch) is now
+    `round_number`-scoped — without that, a question repeating in round 3
+    would collide with its own round-1 answer row: wrong "already
+    answered" rejection under Lock on Selection, wrong upsert target
+    under Change Until Timer Ends, wrong percent-correct in the reveal,
+    wrong score delta on the leaderboard. None of the round-1 behavior
+    for any of these functions changed — they're scoped to
+    `round_number = 1` where they used to have no round concept at all.
+- **Frontend**: `gameApi.ts` gained `playAgain()`. `Results.tsx`'s "Play
+  Again" button now calls it (host-only — non-hosts see a "waiting for
+  the host" card instead, same pattern as the mid-game Reveal/Leaderboard
+  screens) instead of linking to `/create`; a new effect mirrors
+  `GameRoom.tsx`'s existing FINISHED → `/results` effect in reverse —
+  once `play_again` flips `status` back to `WAITING`, every subscribed
+  client (host included) is routed back to `/game/:roomCode`
+  automatically via the same Realtime path every other transition in
+  this app already uses, not a local-only navigation tied to whoever
+  clicked the button. A **separate, smaller bug** surfaced while wiring
+  this up and is fixed alongside it: `GameRoom.tsx`'s
+  "has this question already been answered / already had `end_question`
+  called for it" guards were keyed on `question.questionId` (the
+  underlying `questions.id`), which — now that a question can legitimately
+  repeat across rounds — could collide with a stale value left over from
+  an earlier round and either skip resetting the answer UI or (worse)
+  permanently prevent `end_question` from ever firing for a
+  Host-Controlled game whose repeated question matched one already seen
+  by that ref. Both are now keyed on `game.current_question_id` (the
+  `game_questions` row id), which is fresh every round even when the
+  underlying question repeats.
+- `database.types.ts` — added `round_number` to `games`/`game_questions`/
+  `answers`, and the `play_again` function signature.
+
+**Validated by testing, not just review:**
+- Rebuilt the same disposable local Postgres used since Phase 2 from
+  scratch, applied all 16 migrations clean, re-ran the full existing
+  59-assertion suite unmodified first to confirm zero regressions before
+  adding anything.
+- Added 3 new scenarios (14–16, 24 new assertions, 83 total across the
+  full suite, all passing on a clean re-run):
+  - **Scenario 14**: `play_again` end-to-end — rejected before `FINISHED`
+    and for a non-host caller; once called, the room_code is unchanged,
+    status is back to `WAITING`, `round_number` incremented,
+    `finished_at` cleared, both players' nicknames and the host's
+    `is_host` flag are untouched, both scores are back to 0, no players
+    rows were added or removed, and `start_game` works again immediately
+    for round 2 in the same room.
+  - **Scenario 15**: using the seed's exactly-4-question trivia/easy pool
+    with `question_count = 2` — round 1 draws 2, round 2 (exactly 2 fresh
+    remaining) is proven **completely disjoint** from round 1, and round 3
+    (pool now fully exhausted across rounds 1+2) is proven to fall back to
+    a repeat **without erroring**.
+  - **Scenario 16**: a question forced to repeat across rounds doesn't
+    corrupt scoring — answering it again in a later round isn't blocked
+    by its round-1 answer row, and both rounds' answer rows exist
+    independently (round-scoped), not merged or overwritten.
+- `npm run build` (`tsc -b && vite build`): zero errors.
+- `npm run test` (vitest): 22/22 passing, unchanged from Phase 12 — this
+  phase's changes are SQL/routing-level, with no new pure-function surface
+  that warranted new Vitest cases.
+- `npx oxlint src`: 0 errors (one additional pre-existing-pattern
+  `exhaustive-deps` warning from the new Results.tsx effect, deliberately
+  narrower like every other transition effect in this codebase — 11 total,
+  none newly problematic).
+
+**Backward compatibility, explicitly checked:** `round_number` is
+`not null default 1` on all three tables, so every pre-Phase-13 row reads
+as round 1 with no data migration required, and `start_game`'s "exclude
+previously-used questions" clause is a no-op for any `game_id` with no
+`game_questions` history yet — i.e. every game that has never been
+replayed, new or already in flight — confirmed by Scenario 15's round-1
+behavior matching pre-migration behavior exactly.
+
+**Not included in this phase, and why:**
+- **No cumulative/"best of N rounds" scoring** — `play_again` resets
+  `players.score` to 0 for a clean new scoreboard each round, which is
+  what "Play Again" implies without further specification. A running
+  total across rounds would need its own aggregate leaderboard function
+  and UI, and wasn't part of the reported bug.
+- **No per-round settings editing** (category/difficulty/question count/
+  time limit/game mode/answer behavior all carry over unchanged into the
+  next round) — there's no "edit settings while WAITING" UI at all yet,
+  for the first round or a rematch; out of scope for this fix.
+- **Live Realtime-wire verification** of the new WAITING↔FINISHED round
+  trip wasn't (and can't be, from this sandbox) exercised against a live
+  Supabase project — same standing limitation noted in every earlier
+  phase's Realtime work.
+
+**Next phase:** Phase 14 — production deployment.
+

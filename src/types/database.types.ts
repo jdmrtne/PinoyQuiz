@@ -59,6 +59,7 @@ export interface Database {
           game_mode: GameModeRow;
           answer_behavior: AnswerBehaviorRow;
           phase_started_at: string | null;
+          round_number: number;
           created_at: string;
           started_at: string | null;
           finished_at: string | null;
@@ -112,6 +113,7 @@ export interface Database {
           game_id: string;
           question_id: string;
           question_order: number;
+          round_number: number;
           shuffle_map: number[];
         };
         Insert: Partial<Database["public"]["Tables"]["game_questions"]["Row"]>;
@@ -122,6 +124,7 @@ export interface Database {
         Row: {
           id: string;
           game_id: string;
+          round_number: number;
           player_id: string;
           question_id: string;
           selected_option: number | null;
@@ -285,6 +288,10 @@ export interface Database {
         }[];
       };
       auto_advance_game: {
+        Args: { p_game_id: string };
+        Returns: undefined;
+      };
+      play_again: {
         Args: { p_game_id: string };
         Returns: undefined;
       };

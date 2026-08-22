@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { useParams, useLocation, Link } from "react-router-dom";
+import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { useGameRealtime } from "../hooks/useGameRealtime";
 import { useCurrentUserId } from "../hooks/useCurrentUserId";
 import {
   getLeaderboard,
+  playAgain,
   GameApiError,
   type LeaderboardEntry,
 } from "../lib/gameApi";
@@ -23,6 +24,7 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 export default function Results() {
   const { roomCode } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const navState = location.state as { playerId?: string; isHost?: boolean } | null;
 
   const { state, game, players } = useGameRealtime(roomCode);
@@ -33,8 +35,10 @@ export default function Results() {
   const userId = useCurrentUserId();
   const myPlayer = players.find((p) => p.user_id === userId) ?? null;
   const currentPlayerId = myPlayer?.id ?? navState?.playerId ?? null;
+  const isHost = myPlayer?.is_host ?? navState?.isHost ?? false;
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [startingRematch, setStartingRematch] = useState(false);
 
   useEffect(() => {
     if (!game || game.status !== "FINISHED") return;
@@ -54,6 +58,37 @@ export default function Results() {
       cancelled = true;
     };
   }, [game?.status, game?.id]);
+
+  // play_again (0016_play_again_and_no_repeat_questions.sql) resets THIS
+  // SAME game row back to WAITING for a rematch in the same room. That
+  // status change arrives here through the Realtime subscription above for
+  // every player, not just whoever clicked the button — so this effect,
+  // not the button's own click handler, is what actually sends everyone
+  // back to the room's lobby, in sync with each other.
+  useEffect(() => {
+    if (!game || game.status === "FINISHED") return;
+    navigate(`/game/${roomCode}`, {
+      replace: true,
+      state: { playerId: currentPlayerId, isHost },
+    });
+  }, [game?.status, roomCode, navigate, currentPlayerId, isHost]);
+
+  async function handlePlayAgain() {
+    if (!game) return;
+    setLoadError(null);
+    setStartingRematch(true);
+    try {
+      await playAgain(game.id);
+      // No local navigation here — the effect above does it once the
+      // status change reaches this client via Realtime, the same way
+      // every other transition in this app propagates.
+    } catch (err) {
+      setStartingRematch(false);
+      setLoadError(
+        err instanceof GameApiError ? err.message : "Couldn't start a new round."
+      );
+    }
+  }
 
   if (state.status === "loading") {
     return (
@@ -150,9 +185,23 @@ export default function Results() {
         )}
 
         <div className="flex flex-col gap-3">
+          {isHost ? (
+            <Button
+              size="lg"
+              className="w-full"
+              onClick={handlePlayAgain}
+              disabled={startingRematch}
+            >
+              {startingRematch ? "Starting…" : "Play Again"}
+            </Button>
+          ) : (
+            <Card className="p-4 text-center text-sm text-sampaguita/60">
+              Waiting for the host to start a new round…
+            </Card>
+          )}
           <Link to="/create">
-            <Button size="lg" className="w-full">
-              Play Again
+            <Button size="lg" variant="ghost" className="w-full">
+              Create a Different Room
             </Button>
           </Link>
           <Link to="/">

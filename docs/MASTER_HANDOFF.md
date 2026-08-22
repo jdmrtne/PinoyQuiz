@@ -6,7 +6,46 @@ technical design and per-phase implementation detail, see
 [docs/ARCHITECTURE.md](ARCHITECTURE.md); for a chronological log of every
 change and how it was tested, see [../CHANGELOG.md](../CHANGELOG.md).
 
-## Current state: Phase 12 complete ✅
+## Current state: Phase 13 complete ✅
+
+**Phases 1–13 are done and validated.** Everything from Phase 12 (below)
+still holds, plus — new this phase — "Play Again" is a real rematch in the
+same room instead of a link to a brand-new one, and repeated games in the
+same room no longer draw the same questions until the available pool is
+actually exhausted.
+
+Phase 13 (Play Again + no repeat questions) added:
+
+1. **`play_again(p_game_id)`** — host-only, only once `status = 'FINISHED'`.
+   Resets the SAME `games` row (same `id`, same `room_code`) back to
+   `WAITING` with a new `round_number` and every score zeroed.
+   `players` rows are never touched — nicknames, host status, connection
+   state all carry over automatically, so nobody rejoins or retypes
+   anything. `start_game` (unchanged) is what the host clicks to actually
+   kick off the next round from that same lobby.
+2. **Repeat avoidance** — `games`/`game_questions`/`answers` all gained a
+   `round_number` column (all `not null default 1`, so nothing existing
+   changes). `start_game` now prefers questions never used anywhere in
+   this room's history before falling back to a repeat, which only
+   happens once that pool is actually exhausted — never an error either
+   way. Every function that touches "the current question's" answers
+   (`submit_answer`, `end_question`, `get_answer_reveal`,
+   `get_leaderboard`, `auto_advance_game`) is now `round_number`-scoped,
+   or a repeated question in round 3 would collide with its own leftover
+   answer row from round 1.
+3. A related client-side bug fixed alongside it: two guards in
+   `GameRoom.tsx` were keyed on the underlying `questions.id`, which can
+   now legitimately repeat across rounds — switched to
+   `game.current_question_id` (the `game_questions` row id, fresh every
+   round) so a repeated question can't silently break the "already
+   answered" UI reset or (worse, for Host-Controlled games) permanently
+   block `end_question` from ever firing again.
+
+Full design rationale is in `0016_play_again_and_no_repeat_questions.sql`'s
+header comment — read it before touching this again. See CHANGELOG's
+Phase 13 entry for the full "validated by testing" list.
+
+## Previous state: Phase 12 complete ✅
 
 **Phases 1–12 are done and validated.** The game supports the entire core
 loop, survives players (including the host) dropping mid-game, every
@@ -163,8 +202,39 @@ changes.
 | 10 | Mobile responsiveness + UI polish | ✅ Done |
 | 11 | Testing + bug fixing | ✅ Done |
 | 12 | Automatic Mode + Configurable Answer Behavior | ✅ Done |
-| 13 | Production deployment | ⬜ **Next task** |
-| 14 | Expand question bank to 240 | ⬜ Not started (deferred from Phase 5) |
+| 13 | Play Again (rematch in same room) + no repeat questions | ✅ Done |
+| 14 | Production deployment | ⬜ **Next task** |
+| 15 | Expand question bank to 240 | ⬜ Not started (deferred from Phase 5) |
+
+## What Phase 13 actually built (so you don't re-derive it)
+
+- `supabase/migrations/0016_play_again_and_no_repeat_questions.sql` — new
+  `round_number` column on `games`/`game_questions`/`answers` (all
+  defaulted to 1 for backward compatibility), widened uniqueness
+  constraints on `game_questions`/`answers` to include it, the new
+  `play_again` function, `start_game`'s repeat-avoiding question draw, and
+  `round_number`-scoping added to `submit_answer`/`end_question`/
+  `get_answer_reveal`/`get_leaderboard`/`auto_advance_game`. **Read this
+  migration's header comment before changing any of this** — it explains
+  why the fix is "reset the same room" rather than "create a new room",
+  and exactly which functions needed round-scoping and why.
+- `supabase/tests/run_scenarios.sql` — scenarios 14–16 (24 new assertions,
+  83 total). Same re-run command as before.
+- `src/lib/gameApi.ts` — new `playAgain()`.
+- `src/pages/Results.tsx` — "Play Again" now calls `playAgain()`
+  (host-only) instead of linking to `/create`; new effect mirrors
+  `GameRoom.tsx`'s FINISHED → `/results` effect in reverse.
+- `src/pages/GameRoom.tsx` — two guards (`answeredIndex` reset,
+  `endQuestionCalledRef`) switched from keying on `question.questionId` to
+  `game.current_question_id`, since the former can now collide across
+  rounds when a question repeats — read the migration header comment and
+  CHANGELOG's Phase 13 entry for exactly what broke and why.
+- `src/types/database.types.ts` — `round_number` added to the three
+  tables, `play_again` function signature.
+
+Full reasoning for every design decision is in the migration's header
+comment and CHANGELOG's Phase 13 entry — read those instead of
+re-deriving the same tradeoffs from scratch.
 
 ## What Phase 12 actually built (so you don't re-derive it)
 
@@ -294,7 +364,7 @@ checklist to validate/expand, not a finished plan:
    `.env.local` — `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` need to
    be set in whatever CI/deploy environment builds this, sourced from a
    real (not local-test) Supabase project.
-3. **Every migration in `supabase/migrations/` (0001–0015) and the seed
+3. **Every migration in `supabase/migrations/` (0001–0016) and the seed
    file need to actually be applied against that real Supabase project**
    — this session's testing was all against a disposable local Postgres,
    never against a real hosted Supabase instance. That's a genuine,
@@ -361,7 +431,7 @@ Also needs a stub `supabase_realtime` publication before running
 `0008_realtime.sql`: `create publication supabase_realtime;`.
 
 Then run every migration file in `supabase/migrations/` **in numeric
-order** (`0001` through the newest — currently `0015`), then the seed
+order** (`0001` through the newest — currently `0016`), then the seed
 file in `supabase/seed/`, then simulate real users with a `do $$ ... $$`
 block: `insert into auth.users default values returning id into
 v_some_var;`, switch "who's calling" between statements with

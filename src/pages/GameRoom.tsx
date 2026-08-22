@@ -124,13 +124,16 @@ export default function GameRoom() {
     };
   }, [game?.status, game?.current_question_id, game?.id]);
 
-  // A fresh question means a fresh answer + fresh countdown-to-end_question
-  // guard. Keyed on the question's own id, not just game.status, so this
-  // still resets correctly once Phase 7 starts reusing the QUESTION status
-  // for a second/third question.
+  // A fresh question means a fresh answer. Keyed on game.current_question_id
+  // (the game_questions row id — unique per round even when the underlying
+  // question_id repeats across rounds, see 0016_play_again_and_no_repeat_
+  // questions.sql) rather than question.questionId (the underlying
+  // questions.id, which CAN repeat once a room has played more than one
+  // round) — using the latter would fail to reset answeredIndex on the
+  // rare occasion a repeated question lands right after itself.
   useEffect(() => {
     setAnsweredIndex(null);
-  }, [question?.questionId]);
+  }, [game?.current_question_id]);
 
   // Fetch the reveal payload whenever the game enters REVEAL state.
   useEffect(() => {
@@ -193,6 +196,13 @@ export default function GameRoom() {
   // auto_advance_game (polled by every client, not just the host — see
   // useAutoAdvance) is what ends the question there instead, so this host
   // client doesn't race its own end_question call against that.
+  //
+  // The guard compares against game.current_question_id (the game_questions
+  // row id), not question.questionId (the underlying questions.id) — a
+  // room that's played more than one round (0016_play_again_and_no_repeat_
+  // questions.sql) can legitimately serve the same question again in a
+  // later round, and current_question_id is guaranteed unique per round
+  // even then, where questionId is not.
   const remaining = useServerTimer(
     question?.questionStartedAt ?? null,
     question?.timeLimitSeconds ?? 0
@@ -201,8 +211,8 @@ export default function GameRoom() {
     if (isAutomatic) return;
     if (!isHost || !game || game.status !== "QUESTION" || !question) return;
     if (remaining > 0) return;
-    if (endQuestionCalledRef.current === question.questionId) return;
-    endQuestionCalledRef.current = question.questionId;
+    if (endQuestionCalledRef.current === game.current_question_id) return;
+    endQuestionCalledRef.current = game.current_question_id;
     endQuestion(game.id).catch((err) => {
       // Reset the guard so a transient failure can be retried on the next tick.
       endQuestionCalledRef.current = null;
