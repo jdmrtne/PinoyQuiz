@@ -4,7 +4,7 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/TextField";
 import { joinGame, lookupGame, GameApiError, type RoomLookup } from "../lib/gameApi";
-import { CATEGORY_LABELS, DIFFICULTY_LABELS } from "../data/gameOptions";
+import { categoryDisplayLabel, DIFFICULTY_LABELS } from "../data/gameOptions";
 
 type LookupState =
   | { status: "idle" }
@@ -94,7 +94,7 @@ export default function JoinGame() {
             <p className="text-sm text-sampaguita/90">
               Room found —{" "}
               <span className="font-semibold">
-                {CATEGORY_LABELS[lookup.info.category!]}
+                {categoryDisplayLabel(lookup.info.category!, lookup.info.categories)}
               </span>{" "}
               ·{" "}
               <span className="font-semibold">

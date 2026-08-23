@@ -1,5 +1,58 @@
 # Changelog
 
+## Phase 17 — Host-selectable custom category mix ✅
+
+Adds a second way to scope which questions a game draws from, alongside
+the existing single `category` setting: the host can now multi-select a
+specific SET of categories on the Create Game screen and get a random draw
+restricted to just that set — "random, but custom" per the request.
+
+- **`supabase/migrations/0022_custom_category_mix.sql`** — new nullable
+  `games.categories question_category[]` column. Null/empty (every
+  pre-existing game, and any new game that doesn't use the feature) keeps
+  the exact old behavior, filtered by the single `category` column.
+  When set, it takes priority over `category` for actual question
+  selection.
+  - `create_game` gains a defaulted `p_categories` param (dropped +
+    recreated — same "CREATE OR REPLACE can't widen a function's own
+    argument list" situation 0015 hit).
+  - `lookup_game_by_room_code` now also returns `categories` (dropped +
+    recreated — its output column list changed).
+  - `start_game`'s existing fresh/top-up two-pass draw (from 0016) now
+    branches on a `v_use_custom_categories` flag: `category = any(games.
+    categories)` when set, otherwise the original single-value-or-random
+    filter, unchanged.
+  - `play_again` needed no changes — it only resets the row to WAITING and
+    bumps `round_number`; the next `start_game` call does the actual draw
+    and already respects `categories`.
+- **Frontend:**
+  - `src/types/database.types.ts` — `categories` added to the `games` row
+    type, `create_game` Args, and `lookup_game_by_room_code` Returns.
+  - `src/data/gameOptions.ts` — `CUSTOM_MIX_GROUPS` (CATEGORY_GROUPS minus
+    "random" — a custom mix is a set of real categories, "random" isn't a
+    member of that set) and `categoryDisplayLabel(category, categories)`,
+    which shows the single category's label normally, or `Custom Mix (N)`
+    once more than one custom category is selected.
+  - `src/components/ui/MultiSelectPills.tsx` — new checkbox-group sibling
+    to the existing radio-group `SelectPills`.
+  - `src/pages/CreateGame.tsx` — a Single/Custom Mix toggle above the
+    category pills; Custom Mix swaps in `MultiSelectPills` per group and
+    requires at least one category selected before submit. On submit,
+    Custom Mix sends `category: "random"` (the single-select fallback
+    value) plus the picked `categories` array.
+  - `src/lib/gameApi.ts` — `CreateGameParams`/`RoomLookup` carry
+    `categories` through to `create_game`/`lookup_game_by_room_code`.
+  - `JoinGame.tsx` (pre-join info) and `GameRoom.tsx` (lobby header) both
+    switched from a direct `CATEGORY_LABELS[...]` lookup to
+    `categoryDisplayLabel(...)`.
+- **Tests:** `gameOptions.test.ts` gained `CUSTOM_MIX_GROUPS` integrity
+  tests (same drift checks as the existing `CATEGORY_GROUPS` ones, plus
+  the "never contains random" invariant) and `categoryDisplayLabel`
+  coverage for the null/single/multi cases.
+- **Verification:** `npm run build` and `npx vitest run` both pass (30
+  tests, up from 21); `npm run lint` reports the same pre-existing
+  baseline, no new errors introduced by this phase's files.
+
 ## Phase 16 — Science + Medical categories, 100 new questions ✅
 
 Same shape as Phase 15 (`0018`/`0019`), done out of sequence at explicit

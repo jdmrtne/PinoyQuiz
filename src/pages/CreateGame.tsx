@@ -4,9 +4,11 @@ import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/TextField";
 import { SelectPills } from "../components/ui/SelectPills";
+import { MultiSelectPills } from "../components/ui/MultiSelectPills";
 import {
   CATEGORY_GROUPS,
   CATEGORY_LABELS,
+  CUSTOM_MIX_GROUPS,
   DIFFICULTY_LABELS,
   DIFFICULTY_OPTIONS,
   QUESTION_COUNT_OPTIONS,
@@ -24,12 +26,25 @@ import type {
   GameDifficultySetting,
   GameModeRow,
   AnswerBehaviorRow,
+  QuestionCategoryRow,
 } from "../types/database.types";
+
+type CategoryMode = "single" | "custom";
+
+const CATEGORY_MODE_LABELS: Record<CategoryMode, string> = {
+  single: "Single",
+  custom: "Custom Mix",
+};
 
 export default function CreateGame() {
   const navigate = useNavigate();
   const [nickname, setNickname] = useState("");
   const [category, setCategory] = useState<GameCategorySetting>("random");
+  // Custom Mix (0022): host picks a specific set of categories instead of
+  // one fixed category (or "random" across all of them). The two modes are
+  // mutually exclusive — only whichever is active at submit time is sent.
+  const [categoryMode, setCategoryMode] = useState<CategoryMode>("single");
+  const [customCategories, setCustomCategories] = useState<QuestionCategoryRow[]>([]);
   const [difficulty, setDifficulty] = useState<GameDifficultySetting>("mixed");
   const [questionCount, setQuestionCount] = useState(10);
   const [timeLimit, setTimeLimit] = useState(15);
@@ -49,10 +64,16 @@ export default function CreateGame() {
       return;
     }
 
+    if (categoryMode === "custom" && customCategories.length < 1) {
+      setError("Pick at least one category for your custom mix.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const result = await createGame({
-        category,
+        category: categoryMode === "custom" ? "random" : category,
+        categories: categoryMode === "custom" ? customCategories : undefined,
         difficulty,
         questionCount,
         timeLimitSeconds: timeLimit,
@@ -98,24 +119,57 @@ export default function CreateGame() {
               <span className="text-sm font-semibold text-sampaguita/80">
                 Category
               </span>
-              {/* Phase 14: 23 categories + Random is too many for one flat
-                  pill group on a small screen, so they're clustered into
-                  labeled sections (CATEGORY_GROUPS in data/gameOptions.ts)
-                  while reusing the same SelectPills component/visual style
-                  per group. */}
-              {CATEGORY_GROUPS.map((group) => (
-                <div key={group.label} className="flex flex-col gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-sampaguita/40">
-                    {group.label}
-                  </span>
-                  <SelectPills
-                    options={group.options}
-                    value={category}
-                    onChange={setCategory}
-                    labels={CATEGORY_LABELS}
-                  />
-                </div>
-              ))}
+              {/* 0022: Single (existing behavior — one fixed category, or
+                  "random" across all of them) vs Custom Mix (host picks a
+                  specific subset; the draw is random within just that
+                  subset — "random, but custom"). */}
+              <SelectPills
+                options={["single", "custom"] as CategoryMode[]}
+                value={categoryMode}
+                onChange={setCategoryMode}
+                labels={CATEGORY_MODE_LABELS}
+              />
+
+              {categoryMode === "single" ? (
+                /* Phase 14: 23 categories + Random is too many for one flat
+                   pill group on a small screen, so they're clustered into
+                   labeled sections (CATEGORY_GROUPS in data/gameOptions.ts)
+                   while reusing the same SelectPills component/visual style
+                   per group. */
+                CATEGORY_GROUPS.map((group) => (
+                  <div key={group.label} className="flex flex-col gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-sampaguita/40">
+                      {group.label}
+                    </span>
+                    <SelectPills
+                      options={group.options}
+                      value={category}
+                      onChange={setCategory}
+                      labels={CATEGORY_LABELS}
+                    />
+                  </div>
+                ))
+              ) : (
+                <>
+                  <p className="text-xs text-sampaguita/50 -mt-1">
+                    Pick as many as you like — questions are drawn randomly
+                    from just this set.
+                  </p>
+                  {CUSTOM_MIX_GROUPS.map((group) => (
+                    <div key={group.label} className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-sampaguita/40">
+                        {group.label}
+                      </span>
+                      <MultiSelectPills
+                        options={group.options}
+                        value={customCategories}
+                        onChange={setCustomCategories}
+                        labels={CATEGORY_LABELS}
+                      />
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
 
             <div className="flex flex-col gap-2">

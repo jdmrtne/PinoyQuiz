@@ -3,6 +3,7 @@ import type {
   GameDifficultySetting,
   GameModeRow,
   AnswerBehaviorRow,
+  QuestionCategoryRow,
 } from "../types/database.types";
 
 export const CATEGORY_LABELS: Record<GameCategorySetting, string> = {
@@ -76,6 +77,38 @@ export const CATEGORY_GROUPS: { label: string; options: GameCategorySetting[] }[
   { label: "Sports & Innovation", options: ["sports", "innovations", "technology"] },
   { label: "Science & Medical", options: ["science", "medical"] },
 ];
+
+// CATEGORY_GROUPS minus "random" — 0022's Custom Mix picker multi-selects
+// real categories only (no "random" pill; zero selected just isn't a valid
+// custom mix, distinct from picking "Random" in single-select mode).
+export const CUSTOM_MIX_GROUPS: { label: string; options: QuestionCategoryRow[] }[] =
+  CATEGORY_GROUPS.map((group) => ({
+    label: group.label,
+    options: group.options.filter(
+      (opt): opt is QuestionCategoryRow => opt !== "random"
+    ),
+  })).filter((group) => group.options.length > 0);
+
+/**
+ * What the lobby/pre-join screens show for a game's category setting.
+ * Custom Mix (0022) takes priority over the single `category` value when
+ * present — see games.categories' column comment in
+ * 0022_custom_category_mix.sql. Matches CATEGORY_LABELS's fallback shape:
+ * one category reads as just its label, several read as a short "Custom
+ * Mix (N)" summary rather than spelling all of them out inline.
+ */
+export function categoryDisplayLabel(
+  category: GameCategorySetting,
+  categories: QuestionCategoryRow[] | null | undefined
+): string {
+  if (categories && categories.length > 0) {
+    if (categories.length === 1) {
+      return CATEGORY_LABELS[categories[0]];
+    }
+    return `Custom Mix (${categories.length})`;
+  }
+  return CATEGORY_LABELS[category];
+}
 
 export const DIFFICULTY_LABELS: Record<GameDifficultySetting, string> = {
   mixed: "Mixed",

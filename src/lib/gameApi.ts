@@ -6,6 +6,7 @@ import type {
   GameStatusRow,
   GameModeRow,
   AnswerBehaviorRow,
+  QuestionCategoryRow,
 } from "../types/database.types";
 import type { AnswerReveal, LeaderboardEntry } from "../types/game";
 
@@ -82,6 +83,13 @@ export interface CreateGameParams {
   gameMode?: GameModeRow;
   /** Defaults to LOCK_ON_SELECTION server-side if omitted (0015 migration). */
   answerBehavior?: AnswerBehaviorRow;
+  /**
+   * Custom Mix (0022 migration). When set (non-empty), question selection
+   * is restricted to just these categories instead of the single
+   * `category` value — pass `category: "random"` alongside it, since
+   * that's what the single-select fallback path would otherwise use.
+   */
+  categories?: QuestionCategoryRow[];
 }
 
 export interface CreateGameResult {
@@ -101,6 +109,7 @@ export async function createGame(
     p_host_nickname: params.hostNickname,
     p_game_mode: params.gameMode,
     p_answer_behavior: params.answerBehavior,
+    p_categories: params.categories,
   });
   return {
     gameId: row.out_game_id,
@@ -113,6 +122,8 @@ export interface RoomLookup {
   found: boolean;
   status: GameStatusRow | null;
   category: GameCategorySetting | null;
+  /** Custom Mix (0022 migration) — see categoryDisplayLabel in gameOptions.ts. */
+  categories: QuestionCategoryRow[] | null;
   difficulty: GameDifficultySetting | null;
   questionCount: number | null;
   timeLimitSeconds: number | null;
@@ -126,6 +137,7 @@ export async function lookupGame(roomCode: string): Promise<RoomLookup> {
     found: row.found,
     status: row.status,
     category: row.category,
+    categories: row.categories,
     difficulty: row.difficulty,
     questionCount: row.question_count,
     timeLimitSeconds: row.time_limit_seconds,

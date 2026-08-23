@@ -3,6 +3,8 @@ import {
   CATEGORY_GROUPS,
   CATEGORY_LABELS,
   CATEGORY_OPTIONS,
+  CUSTOM_MIX_GROUPS,
+  categoryDisplayLabel,
   DIFFICULTY_LABELS,
   DIFFICULTY_OPTIONS,
   QUESTION_COUNT_OPTIONS,
@@ -102,5 +104,59 @@ describe("gameOptions data integrity", () => {
       expect(group.label.trim().length).toBeGreaterThan(0);
       expect(group.options.length).toBeGreaterThan(0);
     }
+  });
+
+  // 0022_custom_category_mix.sql — CUSTOM_MIX_GROUPS is CATEGORY_GROUPS
+  // with "random" stripped out (a custom mix is a set of real categories;
+  // "random" isn't a pickable member of that set, it's the single-select
+  // mode's own separate option). These tests catch the same two drift
+  // failure modes as the CATEGORY_GROUPS tests above, plus the "random"
+  // exclusion itself.
+  describe("CUSTOM_MIX_GROUPS", () => {
+    it("contains every real category option exactly once, excluding random", () => {
+      const grouped = CUSTOM_MIX_GROUPS.flatMap((g) => g.options);
+      const realCategories = CATEGORY_OPTIONS.filter((c) => c !== "random");
+      expect(new Set(grouped)).toEqual(new Set(realCategories));
+      expect(grouped.length).toBe(realCategories.length);
+    });
+
+    it("never includes random in any group", () => {
+      for (const group of CUSTOM_MIX_GROUPS) {
+        expect(group.options).not.toContain("random");
+      }
+    });
+
+    it("every group has a non-blank label and at least one option", () => {
+      for (const group of CUSTOM_MIX_GROUPS) {
+        expect(group.label.trim().length).toBeGreaterThan(0);
+        expect(group.options.length).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  describe("categoryDisplayLabel", () => {
+    it("falls back to the single category's label when categories is null/undefined/empty", () => {
+      expect(categoryDisplayLabel("history", null)).toBe(CATEGORY_LABELS.history);
+      expect(categoryDisplayLabel("random", undefined)).toBe(CATEGORY_LABELS.random);
+      expect(categoryDisplayLabel("science", [])).toBe(CATEGORY_LABELS.science);
+    });
+
+    it("shows the single category's own label when exactly one custom category is set", () => {
+      // Even though the game's `category` column is 'random' in this case
+      // (see 0022's header comment), the display should read as the one
+      // actual category picked, not "Random".
+      expect(categoryDisplayLabel("random", ["medical"])).toBe(
+        CATEGORY_LABELS.medical
+      );
+    });
+
+    it("shows a 'Custom Mix (N)' summary when multiple custom categories are set", () => {
+      expect(categoryDisplayLabel("random", ["science", "medical"])).toBe(
+        "Custom Mix (2)"
+      );
+      expect(
+        categoryDisplayLabel("random", ["science", "medical", "history"])
+      ).toBe("Custom Mix (3)");
+    });
   });
 });

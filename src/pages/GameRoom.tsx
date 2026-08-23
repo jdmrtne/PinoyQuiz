@@ -9,7 +9,7 @@ import { QuestionScreen } from "../components/game/QuestionScreen";
 import { RevealScreen } from "../components/game/RevealScreen";
 import { LeaderboardScreen } from "../components/game/LeaderboardScreen";
 import { HostDisconnectedBanner } from "../components/game/HostDisconnectedBanner";
-import { CATEGORY_LABELS, DIFFICULTY_LABELS, GAME_MODE_LABELS, ANSWER_BEHAVIOR_LABELS } from "../data/gameOptions";
+import { categoryDisplayLabel, DIFFICULTY_LABELS, GAME_MODE_LABELS, ANSWER_BEHAVIOR_LABELS } from "../data/gameOptions";
 import { useGameRealtime } from "../hooks/useGameRealtime";
 import { useServerTimer } from "../hooks/useServerTimer";
 import { useCurrentUserId } from "../hooks/useCurrentUserId";
@@ -468,7 +468,7 @@ export default function GameRoom() {
         <div>
           <h1 className="text-3xl font-bold mb-1">Lobby</h1>
           <p className="text-sampaguita/60 text-sm">
-            {CATEGORY_LABELS[game.category]} · {DIFFICULTY_LABELS[game.difficulty]} ·{" "}
+            {categoryDisplayLabel(game.category, game.categories)} · {DIFFICULTY_LABELS[game.difficulty]} ·{" "}
             {game.question_count} questions · {game.time_limit_seconds}s per question
           </p>
           <p className="text-sampaguita/40 text-xs mt-1">

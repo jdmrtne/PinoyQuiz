@@ -55,6 +55,13 @@ export type AnswerOptionRow = "A" | "B" | "C" | "D";
 export type GameModeRow = "HOST_CONTROLLED" | "AUTOMATIC";
 export type AnswerBehaviorRow = "LOCK_ON_SELECTION" | "CHANGE_UNTIL_TIMER_ENDS";
 
+// Added in 0022_custom_category_mix.sql. Null/undefined (or an empty
+// array) means "no custom mix" — the single `category`/`GameCategorySetting`
+// column governs selection instead, exactly as before this feature. When
+// set (non-empty), it takes priority: question draws are restricted to
+// just these categories. Never contains "random" itself — same reason
+// QuestionCategoryRow doesn't.
+
 export interface Database {
   public: {
     Tables: {
@@ -65,6 +72,7 @@ export interface Database {
           host_user_id: string;
           status: GameStatusRow;
           category: GameCategorySetting;
+          categories: QuestionCategoryRow[] | null;
           difficulty: GameDifficultySetting;
           question_count: number;
           time_limit_seconds: number;
@@ -196,6 +204,8 @@ export interface Database {
           p_host_nickname?: string;
           p_game_mode?: GameModeRow;
           p_answer_behavior?: AnswerBehaviorRow;
+          /** Added 0022_custom_category_mix.sql. */
+          p_categories?: QuestionCategoryRow[] | null;
         };
         Returns: {
           out_game_id: string;
@@ -209,6 +219,8 @@ export interface Database {
           found: boolean;
           status: GameStatusRow | null;
           category: GameCategorySetting | null;
+          /** Added 0022_custom_category_mix.sql. */
+          categories: QuestionCategoryRow[] | null;
           difficulty: GameDifficultySetting | null;
           question_count: number | null;
           time_limit_seconds: number | null;
