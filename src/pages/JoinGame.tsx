@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/TextField";
@@ -80,8 +81,12 @@ export default function JoinGame() {
   return (
     <div className="min-h-dvh px-5 py-10 flex flex-col items-center">
       <div className="w-full max-w-md">
-        <Link to="/" className="text-sm text-sampaguita/50 hover:text-mango">
-          ← Back
+        <Link
+          to="/"
+          className="inline-flex items-center gap-1.5 text-sm text-sampaguita/50 hover:text-mango"
+        >
+          <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+          Back
         </Link>
 
         <h1 className="text-3xl font-bold mt-3 mb-1">Join Game</h1>

@@ -1,5 +1,6 @@
 import { Card } from "../ui/Card";
 import clsx from "clsx";
+import { Crown, X } from "lucide-react";
 
 export interface RosterPlayer {
   id: string;
@@ -38,7 +39,14 @@ export function PlayerRoster({
                 !p.connected && "opacity-40"
               )}
             >
-              {p.isHost && <span aria-hidden="true">👑</span>}
+              {p.isHost && (
+                <Crown
+                  className="w-4 h-4 text-mango flex-shrink-0"
+                  aria-hidden="true"
+                  fill="currentColor"
+                  strokeWidth={1.5}
+                />
+              )}
               {p.nickname}
               {p.id === currentPlayerId && (
                 <span className="text-sampaguita/50">(you)</span>
@@ -51,7 +59,7 @@ export function PlayerRoster({
                   aria-label={`Remove ${p.nickname} from the room`}
                   className="ml-0.5 -mr-1.5 -my-2 rounded-full w-8 h-8 flex items-center justify-center text-sampaguita/50 hover:text-sunset hover:bg-sunset/10 transition-colors touch-manipulation"
                 >
-                  ×
+                  <X className="w-4 h-4" aria-hidden="true" />
                 </button>
               )}
             </li>

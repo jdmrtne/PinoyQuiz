@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
+import { Trophy } from "lucide-react";
 import { useGameRealtime } from "../hooks/useGameRealtime";
 import { useCurrentUserId } from "../hooks/useCurrentUserId";
 import {
@@ -11,7 +12,7 @@ import {
   type LeaderboardEntry,
 } from "../lib/gameApi";
 
-const MEDALS = ["🥇", "🥈", "🥉"];
+const MEDAL_COLORS = ["text-mango", "text-sampaguita/70", "text-sunset/80"];
 
 /**
  * Final results — routed to automatically from GameRoom once a game
@@ -154,7 +155,7 @@ export default function Results() {
           <Card className="p-3 flex flex-col gap-2">
             {entries.map((entry) => {
               const isYou = entry.playerId === currentPlayerId;
-              const medal = MEDALS[entry.rank - 1];
+              const medalColor = MEDAL_COLORS[entry.rank - 1];
               return (
                 <div
                   key={entry.playerId}
@@ -167,7 +168,19 @@ export default function Results() {
                   }`}
                 >
                   <span className="flex items-center justify-center w-9 h-9 rounded-full font-display font-bold flex-shrink-0 bg-ink-2 text-mango text-lg">
-                    {medal ?? entry.rank}
+                    {medalColor ? (
+                      <>
+                        <Trophy
+                          className={`w-5 h-5 ${medalColor}`}
+                          aria-hidden="true"
+                          fill="currentColor"
+                          strokeWidth={1.5}
+                        />
+                        <span className="sr-only">Rank {entry.rank}</span>
+                      </>
+                    ) : (
+                      entry.rank
+                    )}
                   </span>
                   <span className="flex-1 font-semibold text-sampaguita truncate">
                     {entry.nickname}
