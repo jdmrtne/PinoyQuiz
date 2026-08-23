@@ -917,3 +917,44 @@ entry — read that instead of re-deriving the same question bank from
 scratch.
 
 Next up (still): **Phase 14 — production deployment**.
+
+## Phase 16 — Science/Medical + general-knowledge categories, Phase 17 — Custom category mix (done, out of order)
+
+Three category-related changes landed on top of Phase 15, two of them
+(general-knowledge expansion and the custom mix feature) developed in
+parallel branches and reconciled here:
+
+1. **`0020_science_medical_categories.sql` / `0021_science_medical_questions.sql`**
+   — added `science` and `medical` (general, non-Philippines-scoped) plus
+   100 questions across them.
+2. **`0022_custom_category_mix.sql`** — a second, independent way to scope
+   a game's questions: `games.categories question_category[]`, nullable
+   and defaulting to null (old single-`category` behavior unchanged).
+   When set, `start_game` filters `category = any(games.categories)`
+   instead of the single-value comparison. Frontend: a Single/Custom Mix
+   toggle on `CreateGame`, `MultiSelectPills` for the multi-select pills,
+   and `categoryDisplayLabel()` so the lobby/pre-join screens show either
+   the one category or a `Custom Mix (N)` summary.
+3. **`0023_expand_general_categories.sql` / `0024_general_knowledge_questions.sql`**
+   (renumbered from a parallel branch's `0020`/`0021`, since those numbers
+   were already taken by #1 and #2 above) — 20 more general-knowledge
+   categories (Mathematics, World History, Animals, Space & Astronomy,
+   etc.), 9 of which get a distinctly-named sibling instead of reusing an
+   existing Philippine-scoped enum value (`world_history` alongside
+   `history`, and so on), plus 160 new questions. `CATEGORY_LABELS` now
+   prefixes every Philippine-scoped category with "Philippine"/"Filipino"
+   to disambiguate. `CATEGORY_GROUPS` (Phase 15) was replaced by
+   `CATEGORY_SECTIONS` — two named sections, "General Knowledge" and
+   "Philippines" — each still broken into small labeled clusters.
+   `CUSTOM_MIX_GROUPS` (#2 above) now derives from `CATEGORY_SECTIONS`
+   instead of the retired `CATEGORY_GROUPS`.
+
+No game-engine changes were needed for either category expansion — same
+reasoning as Phase 15: `create_game`/`start_game`/`auto_advance_game`
+filter by enum type, not an enumerated value list. The three migrations
+apply cleanly in sequence (`0020` → `0024`); `science`'s `add value if
+not exists` in `0023` is a harmless no-op since it already exists from
+`0020`. Verified: `npx tsc --noEmit`, `npx vitest run` (32/32), and
+`npx vite build` all pass on the merged tree. Full category-label
+mapping and migration rationale are in `CHANGELOG.md`'s Phase 16b and
+Phase 17 entries.

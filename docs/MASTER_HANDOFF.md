@@ -6,7 +6,7 @@ technical design and per-phase implementation detail, see
 [docs/ARCHITECTURE.md](ARCHITECTURE.md); for a chronological log of every
 change and how it was tested, see [../CHANGELOG.md](../CHANGELOG.md).
 
-## Current state: Phase 13 complete ✅, plus Phase 15 done out of order ✅
+## Current state: Phase 13 complete ✅, plus Phases 15–17 done out of order ✅
 
 **Phases 1–13 are done and validated.** Everything from Phase 12 (below)
 still holds, plus — new that phase — "Play Again" is a real rematch in the
@@ -14,11 +14,14 @@ same room instead of a link to a brand-new one, and repeated games in the
 same room no longer draw the same questions until the available pool is
 actually exhausted.
 
-**Phase 15 (expand question bank + categories) has also been completed**,
-out of its normal place in the sequence, at explicit request — see
-"What Phase 15 actually built" below. **Phase 14 (production deployment)
-is still the next unstarted phase** and remains next in sequence for
-whoever picks this up.
+**Phases 15, 16, and 17 have also been completed**, out of their normal
+place in the sequence, at explicit request — see "What Phase 15 actually
+built" and "What Phases 16/17 actually built" below. Phase 16 itself
+landed in two parts developed in parallel and then merged: `science`/
+`medical` plus 20 more general-knowledge categories (44 real categories +
+"All Categories" total). **Phase 14 (production deployment) is still the
+next unstarted phase** and remains next in sequence for whoever picks
+this up.
 
 Phase 13 (Play Again + no repeat questions) added:
 
@@ -211,6 +214,8 @@ changes.
 | 13 | Play Again (rematch in same room) + no repeat questions | ✅ Done |
 | 14 | Production deployment | ⬜ **Next task** |
 | 15 | Expand question bank + categories | ✅ Done (out of order — see below) |
+| 16 | Science/Medical + general-knowledge categories | ✅ Done (out of order — see below) |
+| 17 | Host-selectable custom category mix | ✅ Done (out of order — see below) |
 
 ## What Phase 15 actually built (so you don't re-derive it)
 
@@ -258,6 +263,45 @@ changes.
   database (280 rows total) — all pre-existing assertions still pass,
   including Phase 12/13's Automatic Mode, Play Again, and no-repeat-
   question scenarios.
+
+## What Phases 16/17 actually built (so you don't re-derive it)
+
+Three migrations landed on top of Phase 15, two of them from a branch
+developed in parallel with Phase 17 and reconciled afterward:
+
+- `supabase/migrations/0020_science_medical_categories.sql` /
+  `0021_science_medical_questions.sql` — adds `science` and `medical`
+  (general, non-Philippines-scoped) plus 100 new questions across them.
+- `supabase/migrations/0022_custom_category_mix.sql` — new nullable
+  `games.categories question_category[]` column. Null/empty (every
+  pre-Phase-17 game) keeps the old single-`category` behavior; when set,
+  it takes priority for question selection. `create_game` gained a
+  defaulted `p_categories` param, `lookup_game_by_room_code` now returns
+  `categories` too, and `start_game`'s fresh/top-up draw branches on
+  whether a custom set is present. Frontend: a Single/Custom Mix toggle
+  on `CreateGame`, the new `MultiSelectPills` component, and
+  `categoryDisplayLabel()` for the lobby/pre-join "Custom Mix (N)"
+  display.
+- `supabase/migrations/0023_expand_general_categories.sql` /
+  `0024_general_knowledge_questions.sql` — renumbered from a parallel
+  branch's `0020`/`0021` (those numbers were already taken by the two
+  migrations above), adds 20 more general-knowledge categories
+  (Mathematics, World History, Animals, Space & Astronomy, etc.) plus 160
+  new questions. 9 of the 20 share a plain-English name with an existing
+  Philippine category and got a distinctly-named sibling instead
+  (`world_history` alongside `history`) so questions never mix.
+  `CATEGORY_LABELS` now prefixes every Philippine-scoped category with
+  "Philippine"/"Filipino" to disambiguate. `CATEGORY_GROUPS` was replaced
+  by `CATEGORY_SECTIONS` — "General Knowledge" and "Philippines" — and
+  Phase 17's `CUSTOM_MIX_GROUPS` now derives from `CATEGORY_SECTIONS`
+  instead. Total: 44 real categories + "All Categories", up from 24.
+
+No game-engine changes were needed for either category expansion, same
+reasoning as Phase 15. `science`'s `ADD VALUE IF NOT EXISTS` in `0023` is
+a harmless no-op (already added by `0020`). Verified on the merged tree:
+`npx tsc --noEmit`, `npx vitest run` (32/32 passing), and `npx vite
+build` all pass. Full rationale is in `CHANGELOG.md`'s Phase 16b and
+Phase 17 entries, and `ARCHITECTURE.md`'s matching section.
 
 Full reasoning — including which 5 of the 20 requested category names
 were mapped onto existing enum values instead of duplicated, the exact

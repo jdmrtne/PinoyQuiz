@@ -7,7 +7,8 @@ import { TextField } from "../components/ui/TextField";
 import { SelectPills } from "../components/ui/SelectPills";
 import { MultiSelectPills } from "../components/ui/MultiSelectPills";
 import {
-  CATEGORY_GROUPS,
+  CATEGORY_SECTIONS,
+  ALL_CATEGORIES_OPTION,
   CATEGORY_LABELS,
   CUSTOM_MIX_GROUPS,
   DIFFICULTY_LABELS,
@@ -46,6 +47,11 @@ export default function CreateGame() {
   // mutually exclusive — only whichever is active at submit time is sent.
   const [categoryMode, setCategoryMode] = useState<CategoryMode>("single");
   const [customCategories, setCustomCategories] = useState<QuestionCategoryRow[]>([]);
+  // Phase 16: in Single mode, the 44 real categories are grouped into two
+  // named sections (General Knowledge / Philippines) — this toggles which
+  // section's groups are shown below the standalone "All Categories" pill.
+  const CATEGORY_SECTION_LABELS = CATEGORY_SECTIONS.map((s) => s.label);
+  const [categorySection, setCategorySection] = useState(CATEGORY_SECTION_LABELS[0]);
   const [difficulty, setDifficulty] = useState<GameDifficultySetting>("mixed");
   const [questionCount, setQuestionCount] = useState(10);
   const [timeLimit, setTimeLimit] = useState(15);
@@ -136,24 +142,47 @@ export default function CreateGame() {
               />
 
               {categoryMode === "single" ? (
-                /* Phase 14: 23 categories + Random is too many for one flat
-                   pill group on a small screen, so they're clustered into
-                   labeled sections (CATEGORY_GROUPS in data/gameOptions.ts)
-                   while reusing the same SelectPills component/visual style
-                   per group. */
-                CATEGORY_GROUPS.map((group) => (
-                  <div key={group.label} className="flex flex-col gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-sampaguita/40">
-                      {group.label}
-                    </span>
-                    <SelectPills
-                      options={group.options}
-                      value={category}
-                      onChange={setCategory}
-                      labels={CATEGORY_LABELS}
-                    />
-                  </div>
-                ))
+                <>
+                  {/* Phase 16: "All Categories" (the pre-existing `random`
+                      setting) stays visible no matter which section below
+                      is active — it's the fastest path to "just start a
+                      game" and shouldn't be buried inside either section. */}
+                  <SelectPills
+                    options={[ALL_CATEGORIES_OPTION]}
+                    value={category}
+                    onChange={setCategory}
+                    labels={CATEGORY_LABELS}
+                  />
+
+                  {/* Phase 16 grew the category count from 24 to 45 by
+                      adding general-knowledge subjects alongside the
+                      existing Philippine ones. Rather than doubling the
+                      number of labeled groups on screen at once, a
+                      lightweight section toggle (reusing SelectPills
+                      itself) switches between "General Knowledge" and
+                      "Philippines" — each still broken into small labeled
+                      clusters (CATEGORY_SECTIONS in data/gameOptions.ts). */}
+                  <SelectPills
+                    options={CATEGORY_SECTION_LABELS}
+                    value={categorySection}
+                    onChange={setCategorySection}
+                  />
+                  {CATEGORY_SECTIONS.find((s) => s.label === categorySection)?.groups.map(
+                    (group) => (
+                      <div key={group.label} className="flex flex-col gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-sampaguita/40">
+                          {group.label}
+                        </span>
+                        <SelectPills
+                          options={group.options}
+                          value={category}
+                          onChange={setCategory}
+                          labels={CATEGORY_LABELS}
+                        />
+                      </div>
+                    )
+                  )}
+                </>
               ) : (
                 <>
                   <p className="text-xs text-sampaguita/50 -mt-1">

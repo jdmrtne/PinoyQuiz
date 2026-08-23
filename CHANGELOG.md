@@ -1,5 +1,58 @@
 # Changelog
 
+## Phase 16b — General-knowledge category expansion (merged) ✅
+
+Merged in from a branch developed in parallel with Phase 17 (custom
+category mix), off the same Phase 16 base. Both branches added new
+category-related work independently — this phase reconciles them so the
+site has both.
+
+**Completed:**
+- Added 20 new general-knowledge categories to both `game_category_setting`
+  and `question_category` enums in
+  `supabase/migrations/0023_expand_general_categories.sql` (renumbered
+  from the source branch's `0020` — `0020`–`0022` were already taken here
+  by `science`/`medical` and the custom category mix feature): `science`
+  (no-op, already existed), `mathematics`, `world_technology`,
+  `computer_science`, `world_geography`, `world_history`,
+  `world_literature`, `general_language`, `arts`, `world_music`,
+  `world_movies_tv`, `world_sports`, `world_food`, `animals`,
+  `general_nature`, `space_astronomy`, `human_body`, `business_economics`,
+  `logic_reasoning`, `general_trivia`. `medical` (Phase 16 original) is
+  untouched and kept as its own category, not folded into any of the 20.
+- 9 of these 20 subjects share a plain-English name with an existing
+  Philippine-scoped category (e.g. `history` = Philippine history only)
+  — each got a distinctly-named sibling (`world_history`, etc.) instead
+  of reusing the enum value, so questions never mix between the two.
+- Added 160 new general-knowledge questions in
+  `supabase/migrations/0024_general_knowledge_questions.sql` (renumbered
+  from `0021`), 8 per new category. Checked against the existing 380
+  questions (seed + Phases 14/15/16) for prompt overlap — none found.
+- **Frontend, reconciled with Phase 17's Custom Mix feature:**
+  - `src/data/gameOptions.ts` — `CATEGORY_LABELS` now prefixes every
+    Philippine-scoped category with "Philippine"/"Filipino" (e.g. `history`
+    → "Philippine History") so it's never confused with its
+    general-knowledge sibling. `random` now reads "All Categories".
+    `CATEGORY_GROUPS` was replaced by `CATEGORY_SECTIONS` — two named
+    top-level sections ("General Knowledge" / "Philippines"), each broken
+    into the same small labeled clusters as before. `medical` sits in
+    General Knowledge → "Sciences & Tech" alongside `science`.
+    `CUSTOM_MIX_GROUPS` (Phase 17) now derives from `CATEGORY_SECTIONS`
+    instead of the retired `CATEGORY_GROUPS` — flattens both sections'
+    groups into one list for the Custom Mix multi-select, since every
+    group label across the two sections is unique. `categoryDisplayLabel`
+    is unchanged.
+  - `src/pages/CreateGame.tsx` — the Single/Custom Mix toggle (Phase 17)
+    is unchanged and sits above the category pills. In Single mode, a
+    standalone "All Categories" pill plus a General Knowledge/Philippines
+    section toggle (Phase 16) now sit above the labeled group pills. In
+    Custom Mix mode, `CUSTOM_MIX_GROUPS` renders as before, now covering
+    all 44 real categories across 10 groups instead of 6.
+  - `src/types/database.types.ts` — `GameCategorySetting` grew by the 19
+    new values (`science` already existed).
+- Verified `npx tsc --noEmit`, `npx vitest run` (32/32 passing), and
+  `npx vite build` all pass on the merged tree.
+
 ## Phase 17 — Host-selectable custom category mix ✅
 
 Adds a second way to scope which questions a game draws from, alongside

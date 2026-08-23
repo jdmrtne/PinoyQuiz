@@ -7,87 +7,156 @@ import type {
 } from "../types/database.types";
 
 export const CATEGORY_LABELS: Record<GameCategorySetting, string> = {
-  random: "Random",
+  random: "All Categories",
+  // Philippine-scoped categories. Several share a name with a Phase 16
+  // general-knowledge category below (History, Geography, Music, etc.)
+  // but contain only Philippine-focused questions — labeled with a
+  // "Philippine"/"Filipino" prefix so the two are never confused in the
+  // picker. This is a label-only change; the underlying enum values and
+  // stored questions are untouched (see 0020's migration header).
   history: "Philippine History",
-  geography: "Geography",
+  geography: "Philippine Geography",
   culture: "Filipino Culture",
   food: "Filipino Food",
-  entertainment: "Entertainment",
+  entertainment: "Philippine Entertainment",
   sports: "Philippine Sports",
-  trivia: "Trivia",
-  slang: "Slang & Language",
-  // Added Phase 14 (supabase/migrations/0018_expand_categories.sql).
-  politics_government: "Politics & Government",
-  provinces_cities: "Provinces & Cities",
-  languages: "Languages",
-  literature: "Literature",
-  music: "Music",
-  movies_tv: "Movies & TV",
-  celebrities: "Celebrities",
-  festivals: "Festivals",
-  mythology_folklore: "Mythology & Folklore",
-  nature_wildlife: "Nature & Wildlife",
-  landmarks: "Landmarks",
-  innovations: "Inventions & Innovations",
-  economy_business: "Economy & Business",
+  trivia: "Philippine Trivia",
+  slang: "Filipino Slang",
+  // Added Phase 15 (supabase/migrations/0018_expand_categories.sql).
+  politics_government: "Philippine Politics & Government",
+  provinces_cities: "Philippine Provinces & Cities",
+  languages: "Philippine Languages",
+  literature: "Philippine Literature",
+  music: "Philippine Music",
+  movies_tv: "Philippine Movies & TV",
+  celebrities: "Philippine Celebrities",
+  festivals: "Philippine Festivals",
+  mythology_folklore: "Philippine Mythology & Folklore",
+  nature_wildlife: "Philippine Nature & Wildlife",
+  landmarks: "Philippine Landmarks",
+  innovations: "Philippine Inventions & Innovations",
+  economy_business: "Philippine Economy & Business",
   technology: "Filipino Technology",
-  religion_traditions: "Religion & Traditions",
-  // Added Phase 16 (supabase/migrations/0020_science_medical_categories.sql).
+  religion_traditions: "Philippine Religion & Traditions",
+  // Added Phase 16 (supabase/migrations/0020_science_medical_categories.sql
+  // + 0023_expand_general_categories.sql) — general-knowledge subjects,
+  // deliberately NOT Philippines-scoped.
   science: "Science",
   medical: "Medical",
+  mathematics: "Mathematics",
+  world_technology: "Technology",
+  computer_science: "Computer Science",
+  world_geography: "Geography",
+  world_history: "History",
+  world_literature: "Literature",
+  general_language: "Language",
+  arts: "Arts",
+  world_music: "Music",
+  world_movies_tv: "Movies & TV",
+  world_sports: "Sports",
+  world_food: "Food & Cooking",
+  animals: "Animals",
+  general_nature: "Nature & Environment",
+  space_astronomy: "Space & Astronomy",
+  human_body: "Human Body",
+  business_economics: "Business & Economics",
+  logic_reasoning: "Logic & Reasoning",
+  general_trivia: "General Trivia",
 };
 
 export const CATEGORY_OPTIONS = Object.keys(
   CATEGORY_LABELS
 ) as GameCategorySetting[];
 
-// CreateGame renders CATEGORY_OPTIONS as a flat SelectPills group (see
-// src/pages/CreateGame.tsx). With 23 real categories + "Random", a flat
-// grid is still scannable on desktop, but Phase 14 grouped it into
-// labeled clusters for mobile — see CATEGORY_GROUPS below and its use in
-// CreateGame.tsx's "Category" section.
-export const CATEGORY_GROUPS: { label: string; options: GameCategorySetting[] }[] = [
-  { label: "General", options: ["random", "trivia", "history", "geography"] },
+// "All Categories" (the pre-existing `random` setting) is rendered as its
+// own standalone pick above both sections below, not inside either one —
+// see CreateGame.tsx.
+export const ALL_CATEGORIES_OPTION: GameCategorySetting = "random";
+
+type CategoryGroup = { label: string; options: GameCategorySetting[] };
+type CategorySection = { label: string; groups: CategoryGroup[] };
+
+// Phase 16 grew the category count from 24 (23 + Random) to 45. CreateGame
+// renders two named sections — "General Knowledge" and "Philippines" —
+// each broken into small labeled clusters, so the picker stays scannable
+// instead of becoming one wall of pills. Same SelectPills component and
+// visual style throughout; only the section/group structure differs.
+export const CATEGORY_SECTIONS: CategorySection[] = [
   {
-    label: "Culture & Life",
-    options: [
-      "culture",
-      "food",
-      "religion_traditions",
-      "festivals",
-      "mythology_folklore",
-      "languages",
-      "slang",
+    label: "General Knowledge",
+    groups: [
+      {
+        label: "Sciences & Tech",
+        options: ["science", "medical", "mathematics", "world_technology", "computer_science"],
+      },
+      {
+        label: "World Knowledge",
+        options: ["world_geography", "world_history", "world_literature", "general_language"],
+      },
+      {
+        label: "Culture & Media",
+        options: ["arts", "world_music", "world_movies_tv", "world_sports"],
+      },
+      {
+        label: "Life & Nature",
+        options: ["world_food", "animals", "general_nature", "space_astronomy"],
+      },
+      {
+        label: "Body, Business & Mind",
+        options: ["human_body", "business_economics", "logic_reasoning", "general_trivia"],
+      },
     ],
   },
   {
-    label: "Arts & Entertainment",
-    options: ["entertainment", "movies_tv", "music", "literature", "celebrities"],
-  },
-  {
-    label: "Places & Society",
-    options: [
-      "provinces_cities",
-      "landmarks",
-      "nature_wildlife",
-      "politics_government",
-      "economy_business",
+    label: "Philippines",
+    groups: [
+      { label: "General", options: ["trivia", "history", "geography"] },
+      {
+        label: "Culture & Life",
+        options: [
+          "culture",
+          "food",
+          "religion_traditions",
+          "festivals",
+          "mythology_folklore",
+          "languages",
+          "slang",
+        ],
+      },
+      {
+        label: "Arts & Entertainment",
+        options: ["entertainment", "movies_tv", "music", "literature", "celebrities"],
+      },
+      {
+        label: "Places & Society",
+        options: [
+          "provinces_cities",
+          "landmarks",
+          "nature_wildlife",
+          "politics_government",
+          "economy_business",
+        ],
+      },
+      { label: "Sports & Innovation", options: ["sports", "innovations", "technology"] },
     ],
   },
-  { label: "Sports & Innovation", options: ["sports", "innovations", "technology"] },
-  { label: "Science & Medical", options: ["science", "medical"] },
 ];
 
-// CATEGORY_GROUPS minus "random" — 0022's Custom Mix picker multi-selects
-// real categories only (no "random" pill; zero selected just isn't a valid
-// custom mix, distinct from picking "Random" in single-select mode).
+// 0022's Custom Mix picker multi-selects real categories only (no "random"
+// pill; zero selected just isn't a valid custom mix, distinct from picking
+// "Random"/"All Categories" in single-select mode). Flattens both
+// CATEGORY_SECTIONS sections into one list of groups — every group label
+// across the two sections is unique (see gameOptions.test.ts), so this is
+// safe to render as a single flat list in the Custom Mix UI.
 export const CUSTOM_MIX_GROUPS: { label: string; options: QuestionCategoryRow[] }[] =
-  CATEGORY_GROUPS.map((group) => ({
-    label: group.label,
-    options: group.options.filter(
-      (opt): opt is QuestionCategoryRow => opt !== "random"
-    ),
-  })).filter((group) => group.options.length > 0);
+  CATEGORY_SECTIONS.flatMap((section) => section.groups)
+    .map((group) => ({
+      label: group.label,
+      options: group.options.filter(
+        (opt): opt is QuestionCategoryRow => opt !== "random"
+      ),
+    }))
+    .filter((group) => group.options.length > 0);
 
 /**
  * What the lobby/pre-join screens show for a game's category setting.

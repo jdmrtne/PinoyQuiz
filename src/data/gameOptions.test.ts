@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  CATEGORY_GROUPS,
+  CATEGORY_SECTIONS,
+  ALL_CATEGORIES_OPTION,
   CATEGORY_LABELS,
   CATEGORY_OPTIONS,
   CUSTOM_MIX_GROUPS,
@@ -86,32 +87,52 @@ describe("gameOptions data integrity", () => {
     expect(ANSWER_BEHAVIOR_OPTIONS).toContain("LOCK_ON_SELECTION");
   });
 
-  // Phase 14: CreateGame renders CATEGORY_GROUPS instead of a flat
-  // CATEGORY_OPTIONS list once the category count grew past 8. These tests
-  // catch the two ways that grouping can silently drift from the source of
-  // truth (CATEGORY_LABELS): a new category added to CATEGORY_LABELS but
-  // forgotten in CATEGORY_GROUPS (invisible in the UI), or a stray/renamed
-  // option left in a group after a label is removed (crashes the pill's
-  // label lookup at render time).
-  it("CATEGORY_GROUPS contains every category option exactly once, with no unknown options", () => {
-    const grouped = CATEGORY_GROUPS.flatMap((g) => g.options);
-    expect(new Set(grouped)).toEqual(new Set(CATEGORY_OPTIONS));
-    expect(grouped.length).toBe(CATEGORY_OPTIONS.length);
+  // Phase 15: CreateGame stopped rendering a flat CATEGORY_OPTIONS list
+  // once the category count grew past 8, switching to labeled groups.
+  // Phase 16 nested those groups one level deeper into named sections
+  // (General Knowledge / Philippines) when the count grew again, from 24
+  // to 45. These tests catch the two ways that structure can silently
+  // drift from the source of truth (CATEGORY_LABELS): a new category
+  // added to CATEGORY_LABELS but forgotten in CATEGORY_SECTIONS
+  // (invisible in the UI), or a stray/renamed option left in a group
+  // after a label is removed (crashes the pill's label lookup at render
+  // time).
+  it("CATEGORY_SECTIONS' groups contain every category option exactly once, except 'random' (rendered standalone via ALL_CATEGORIES_OPTION)", () => {
+    const grouped = CATEGORY_SECTIONS.flatMap((s) => s.groups.flatMap((g) => g.options));
+    const expected = CATEGORY_OPTIONS.filter((c) => c !== ALL_CATEGORIES_OPTION);
+    expect(new Set(grouped)).toEqual(new Set(expected));
+    expect(grouped.length).toBe(expected.length);
   });
 
-  it("every CATEGORY_GROUPS entry has a non-blank label and at least one option", () => {
-    for (const group of CATEGORY_GROUPS) {
-      expect(group.label.trim().length).toBeGreaterThan(0);
-      expect(group.options.length).toBeGreaterThan(0);
+  it("every CATEGORY_SECTIONS section and group has a non-blank label and at least one entry", () => {
+    expect(CATEGORY_SECTIONS.length).toBeGreaterThan(0);
+    for (const section of CATEGORY_SECTIONS) {
+      expect(section.label.trim().length).toBeGreaterThan(0);
+      expect(section.groups.length).toBeGreaterThan(0);
+      for (const group of section.groups) {
+        expect(group.label.trim().length).toBeGreaterThan(0);
+        expect(group.options.length).toBeGreaterThan(0);
+      }
     }
   });
 
-  // 0022_custom_category_mix.sql — CUSTOM_MIX_GROUPS is CATEGORY_GROUPS
-  // with "random" stripped out (a custom mix is a set of real categories;
-  // "random" isn't a pickable member of that set, it's the single-select
-  // mode's own separate option). These tests catch the same two drift
-  // failure modes as the CATEGORY_GROUPS tests above, plus the "random"
-  // exclusion itself.
+  it("no two sections use the same group label (each must be unambiguous on screen)", () => {
+    const allGroupLabels = CATEGORY_SECTIONS.flatMap((s) => s.groups.map((g) => g.label));
+    expect(new Set(allGroupLabels).size).toBe(allGroupLabels.length);
+  });
+
+  it("ALL_CATEGORIES_OPTION is 'random' and is not duplicated inside any section (it's rendered standalone)", () => {
+    expect(ALL_CATEGORIES_OPTION).toBe("random");
+    const grouped = CATEGORY_SECTIONS.flatMap((s) => s.groups.flatMap((g) => g.options));
+    expect(grouped).not.toContain(ALL_CATEGORIES_OPTION);
+  });
+
+  // 0022_custom_category_mix.sql — CUSTOM_MIX_GROUPS flattens
+  // CATEGORY_SECTIONS' groups with "random" stripped out (a custom mix is
+  // a set of real categories; "random" isn't a pickable member of that
+  // set, it's the single-select mode's own separate option). These tests
+  // catch the same drift failure modes as the CATEGORY_SECTIONS tests
+  // above, plus the "random" exclusion itself.
   describe("CUSTOM_MIX_GROUPS", () => {
     it("contains every real category option exactly once, excluding random", () => {
       const grouped = CUSTOM_MIX_GROUPS.flatMap((g) => g.options);

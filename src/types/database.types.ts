@@ -41,6 +41,31 @@ export type GameCategorySetting =
   // — general (non-Philippines-scoped) Science and Medical categories.
   | "science"
   | "medical"
+  // Added Phase 16 cont'd (supabase/migrations/0023_expand_general_categories.sql)
+  // — 20 more general-knowledge categories, deliberately not
+  // Philippines-scoped. Several share a display label with a Philippine
+  // category above (e.g. "History" here vs. "Philippine History" for
+  // `history`) but are separate enum values on purpose — see 0023's
+  // migration header.
+  | "mathematics"
+  | "world_technology"
+  | "computer_science"
+  | "world_geography"
+  | "world_history"
+  | "world_literature"
+  | "general_language"
+  | "arts"
+  | "world_music"
+  | "world_movies_tv"
+  | "world_sports"
+  | "world_food"
+  | "animals"
+  | "general_nature"
+  | "space_astronomy"
+  | "human_body"
+  | "business_economics"
+  | "logic_reasoning"
+  | "general_trivia"
   | "random";
 
 export type QuestionCategoryRow = Exclude<GameCategorySetting, "random">;
