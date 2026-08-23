@@ -31,6 +31,9 @@ export const CATEGORY_LABELS: Record<GameCategorySetting, string> = {
   economy_business: "Economy & Business",
   technology: "Filipino Technology",
   religion_traditions: "Religion & Traditions",
+  // Added Phase 16 (supabase/migrations/0020_science_medical_categories.sql).
+  science: "Science",
+  medical: "Medical",
 };
 
 export const CATEGORY_OPTIONS = Object.keys(
@@ -71,6 +74,7 @@ export const CATEGORY_GROUPS: { label: string; options: GameCategorySetting[] }[
     ],
   },
   { label: "Sports & Innovation", options: ["sports", "innovations", "technology"] },
+  { label: "Science & Medical", options: ["science", "medical"] },
 ];
 
 export const DIFFICULTY_LABELS: Record<GameDifficultySetting, string> = {

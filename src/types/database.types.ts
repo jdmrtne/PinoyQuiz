@@ -37,6 +37,10 @@ export type GameCategorySetting =
   | "economy_business"
   | "technology"
   | "religion_traditions"
+  // Added Phase 16 (supabase/migrations/0020_science_medical_categories.sql)
+  // — general (non-Philippines-scoped) Science and Medical categories.
+  | "science"
+  | "medical"
   | "random";
 
 export type QuestionCategoryRow = Exclude<GameCategorySetting, "random">;

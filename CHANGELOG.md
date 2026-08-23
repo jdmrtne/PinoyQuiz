@@ -1,5 +1,73 @@
 # Changelog
 
+## Phase 16 — Science + Medical categories, 100 new questions ✅
+
+Same shape as Phase 15 (`0018`/`0019`), done out of sequence at explicit
+request: `0020_science_medical_categories.sql` adds `science` and
+`medical` to `game_category_setting`/`question_category` as their own
+committed migration (enum values can't be used in the same transaction
+that adds them), then `0021_science_medical_questions.sql` inserts 100
+new questions guarded by a `WHERE NOT EXISTS` check on
+`(category, prompt)`, same idempotency approach as `0019`.
+
+**Unlike Phase 15, these categories are deliberately NOT
+Philippines-scoped** — no existing category fit general science/medical
+knowledge, so two new ones were added rather than folding into an
+existing category.
+
+- **Science (50 questions):** 10 each — Biology, Chemistry, Physics,
+  Earth Science, Astronomy. Deliberately varied per subject (identification,
+  cause/effect, function, comparison, basic calculation) rather than
+  repeating the same fact reworded.
+- **Medical (50 questions):** 10 each — Anatomy, Physiology,
+  Microbiology, Pathology, Pharmacology. All objective, non-diagnostic,
+  non-clinical facts — no patient scenarios, no personalized advice, no
+  contested claims. Every question has exactly one well-established
+  correct answer.
+- **Difficulty (both categories combined):** 30 easy / 44 medium / 26
+  hard, approximating the requested 30/45/25 split.
+- **Duplicate check:** every new prompt was checked against the full
+  existing bank (80-question seed + Phase 15's 200) before writing —
+  none overlapped, since the existing bank is entirely Philippines-scoped
+  (culture, geography, Filipino scientists/inventors, etc.) rather than
+  general science/medical fact recall. All 100 new prompts are also
+  unique against each other.
+
+**Frontend (required — `CATEGORY_LABELS` is an exhaustive
+`Record<GameCategorySetting, string>`, so a missing entry fails the
+build):**
+- `src/types/database.types.ts` — added `science` and `medical` to
+  `GameCategorySetting`.
+- `src/data/gameOptions.ts` — added labels for both to `CATEGORY_LABELS`
+  and a new "Science & Medical" entry to `CATEGORY_GROUPS`.
+- No other UI changes — same multiple-choice format, no new quiz modes.
+
+**Verification (local Postgres, not the live Supabase project — see
+below):** ran the full migration chain `0001`–`0021` plus the seed file
+against a scratch database. Confirmed: 380 total questions (280
+pre-existing + 100 new), `science` = 50, `medical` = 50, zero duplicate
+`id`s, zero duplicate `(category, prompt)` pairs, zero rows with a null
+`correct_option` or missing option text, zero rows with a blank
+explanation. Re-ran `0021` a second time and confirmed it inserted 0
+additional rows (idempotency holds). `npx tsc -b`: clean. `npx vitest
+run`: 24/24 pass, including the `gameOptions.test.ts` integrity checks
+that would fail if either category were missing a label or group entry.
+
+**Not included in this phase (by design, per the request's scope):**
+- No changes to scoring, timers, Automatic Mode pacing, or Play Again
+  behavior.
+- No new quiz formats (true/false, identification, etc.) — same
+  multiple-choice system throughout.
+- **Not pushed to the live Supabase project.** This sandbox has no
+  network access to Supabase and no service-role credentials, so
+  `0020`/`0021` were validated against a local Postgres replica running
+  the identical schema rather than the real database. Run `supabase db
+  push` (or apply the two files via the CLI/dashboard) against the real
+  project to actually land this.
+
+**Next phase:** Phase 14 — production deployment — is still the next
+unstarted phase in the original sequence.
+
 ## Phase 1 — Project setup and UI foundation ✅
 
 **Completed:**
