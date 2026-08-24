@@ -23,6 +23,17 @@ export type Category =
 
 export type Difficulty = "easy" | "medium" | "hard" | "mixed";
 
+/**
+ * Added Phase 1 of the question-types work (0026_question_types_phase1.sql).
+ * More values (unscramble, matching, image, sequence, scenario) arrive in
+ * later phases — see docs/MASTER_HANDOFF.md's Phase 12 addendum.
+ */
+export type QuestionType =
+  | "multiple_choice"
+  | "true_false"
+  | "identification"
+  | "fill_blank";
+
 /** Added alongside 0015_automatic_mode_and_answer_behavior.sql. */
 export type GameMode = "HOST_CONTROLLED" | "AUTOMATIC";
 export type AnswerBehavior = "LOCK_ON_SELECTION" | "CHANGE_UNTIL_TIMER_ENDS";
@@ -34,6 +45,8 @@ export interface GameSettings {
   timeLimitSeconds: number;
   gameMode: GameMode;
   answerBehavior: AnswerBehavior;
+  /** Added Phase 1 of the question-types work — opt in to true_false/identification/fill_blank alongside multiple_choice. */
+  includeNewQuestionTypes?: boolean;
 }
 
 export interface Game {
@@ -66,18 +79,26 @@ export interface ClientQuestion {
   id: string;
   category: Exclude<Category, "random">;
   difficulty: Difficulty;
+  questionType: QuestionType;
   prompt: string;
-  options: [string, string, string, string];
+  /** Populated left-to-right; entries past this type's real option count are null (see CurrentQuestion in gameApi.ts). */
+  options: [string | null, string | null, string | null, string | null];
   order: number;
   totalQuestions: number;
 }
 
 export interface AnswerReveal {
   questionId: string;
-  correctOptionIndex: number;
-  correctOptionText: string;
+  questionType: QuestionType;
+  /** Choice-based types (multiple_choice/true_false) only — null for identification/fill_blank. */
+  correctOptionIndex: number | null;
+  correctOptionText: string | null;
+  /** Text-answer types (identification/fill_blank) only — the canonical accepted answer. */
+  correctAnswer: string | null;
   explanation?: string;
   yourAnswerIndex: number | null;
+  /** This player's typed submission — text-answer types only. */
+  yourTextAnswer: string | null;
   yourPointsEarned: number;
   wasCorrect: boolean;
   percentCorrect: number;

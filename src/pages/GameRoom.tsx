@@ -21,6 +21,7 @@ import {
   beginFirstQuestion,
   getCurrentQuestion,
   submitAnswer,
+  submitTextAnswer,
   endQuestion,
   getAnswerReveal,
   advanceToLeaderboard,
@@ -43,6 +44,7 @@ export default function GameRoom() {
   const [starting, setStarting] = useState(false);
   const [question, setQuestion] = useState<CurrentQuestion | null>(null);
   const [answeredIndex, setAnsweredIndex] = useState<number | null>(null);
+  const [answeredText, setAnsweredText] = useState<string | null>(null);
   const [reveal, setReveal] = useState<AnswerReveal | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [advancing, setAdvancing] = useState(false);
@@ -133,6 +135,7 @@ export default function GameRoom() {
   // rare occasion a repeated question lands right after itself.
   useEffect(() => {
     setAnsweredIndex(null);
+    setAnsweredText(null);
   }, [game?.current_question_id]);
 
   // Fetch the reveal payload whenever the game enters REVEAL state.
@@ -273,6 +276,24 @@ export default function GameRoom() {
     }
   }
 
+  async function handleAnswerText(text: string) {
+    if (!game) return;
+    const canChangeAnswer = game.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS";
+    if (!canChangeAnswer && answeredText !== null) return;
+    if (answeredText === text) return; // resubmitting the same text is a no-op
+    setActionError(null);
+    const previous = answeredText;
+    setAnsweredText(text); // optimistic — locks/updates the UI immediately
+    try {
+      await submitTextAnswer(game.id, text);
+    } catch (err) {
+      setAnsweredText(previous); // revert to whatever was actually locked in
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't submit your answer."
+      );
+    }
+  }
+
   async function handleRemove(playerId: string) {
     setActionError(null);
     try {
@@ -395,7 +416,9 @@ export default function GameRoom() {
         <QuestionScreen
           question={question}
           answeredIndex={answeredIndex}
+          answeredText={answeredText}
           onAnswer={handleAnswer}
+          onAnswerText={handleAnswerText}
           canChangeAnswer={game.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS"}
           isAutomatic={isAutomatic}
         />

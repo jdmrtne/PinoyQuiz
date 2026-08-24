@@ -73,6 +73,15 @@ export type QuestionDifficultyRow = "easy" | "medium" | "hard";
 export type GameDifficultySetting = QuestionDifficultyRow | "mixed";
 export type AnswerOptionRow = "A" | "B" | "C" | "D";
 
+// Added 0026_question_types_phase1.sql. More values (unscramble, matching,
+// image, sequence, scenario) land in later phases via `alter type ...
+// add value` — see that migration's header.
+export type QuestionTypeRow =
+  | "multiple_choice"
+  | "true_false"
+  | "identification"
+  | "fill_blank";
+
 // Added in 0015_automatic_mode_and_answer_behavior.sql. Both default to the
 // pre-existing (only) behavior — HOST_CONTROLLED / LOCK_ON_SELECTION — so
 // every game row from before this migration reads as one of these values,
@@ -114,6 +123,8 @@ export interface Database {
           answer_behavior: AnswerBehaviorRow;
           phase_started_at: string | null;
           round_number: number;
+          /** Added 0026_question_types_phase1.sql — opt-in to draw true_false/identification/fill_blank alongside multiple_choice. */
+          include_new_question_types: boolean;
           created_at: string;
           started_at: string | null;
           finished_at: string | null;
@@ -148,12 +159,18 @@ export interface Database {
           id: string;
           category: QuestionCategoryRow;
           difficulty: QuestionDifficultyRow;
+          /** Added 0026_question_types_phase1.sql. Defaults to multiple_choice for every pre-existing row. */
+          question_type: QuestionTypeRow;
           prompt: string;
-          option_a: string;
-          option_b: string;
-          option_c: string;
-          option_d: string;
-          correct_option: AnswerOptionRow;
+          /** Nullable as of 0026 — only required for multiple_choice/true_false (see that migration's check constraints). */
+          option_a: string | null;
+          option_b: string | null;
+          option_c: string | null;
+          option_d: string | null;
+          correct_option: AnswerOptionRow | null;
+          /** Added 0026 — required for identification/fill_blank, null otherwise. */
+          correct_answer: string | null;
+          acceptable_answers: string[] | null;
           explanation: string | null;
           created_at: string;
         };
@@ -182,6 +199,8 @@ export interface Database {
           player_id: string;
           question_id: string;
           selected_option: number | null;
+          /** Added 0026_question_types_phase1.sql — typed answer for identification/fill_blank. */
+          submitted_text: string | null;
           is_correct: boolean;
           response_time_ms: number | null;
           points: number;
@@ -231,6 +250,8 @@ export interface Database {
           p_answer_behavior?: AnswerBehaviorRow;
           /** Added 0022_custom_category_mix.sql. */
           p_categories?: QuestionCategoryRow[] | null;
+          /** Added 0026_question_types_phase1.sql. Defaults to false server-side. */
+          p_include_new_question_types?: boolean;
         };
         Returns: {
           out_game_id: string;
@@ -277,11 +298,14 @@ export interface Database {
         Args: { p_game_id: string };
         Returns: {
           out_question_id: string;
+          /** Added 0026_question_types_phase1.sql. */
+          out_question_type: QuestionTypeRow;
           out_prompt: string;
-          out_option_1: string;
-          out_option_2: string;
-          out_option_3: string;
-          out_option_4: string;
+          /** Null past however many options this question's type actually has — see 0026. */
+          out_option_1: string | null;
+          out_option_2: string | null;
+          out_option_3: string | null;
+          out_option_4: string | null;
           out_order: number;
           out_total: number;
           out_time_limit_seconds: number;
@@ -295,6 +319,14 @@ export interface Database {
           out_points: number;
         }[];
       };
+      /** Added 0026_question_types_phase1.sql — identification/fill_blank counterpart to submit_answer. */
+      submit_text_answer: {
+        Args: { p_game_id: string; p_answer_text: string };
+        Returns: {
+          out_is_correct: boolean;
+          out_points: number;
+        }[];
+      };
       end_question: {
         Args: { p_game_id: string };
         Returns: undefined;
@@ -303,10 +335,16 @@ export interface Database {
         Args: { p_game_id: string };
         Returns: {
           out_question_id: string;
-          out_correct_option: number;
-          out_correct_text: string;
+          /** Added 0026_question_types_phase1.sql. */
+          out_question_type: QuestionTypeRow;
+          out_correct_option: number | null;
+          out_correct_text: string | null;
+          /** Added 0026 — canonical typed answer, identification/fill_blank only. */
+          out_correct_answer: string | null;
           out_explanation: string | null;
           out_your_answer: number | null;
+          /** Added 0026 — this player's typed submission, identification/fill_blank only. */
+          out_your_text_answer: string | null;
           out_your_points: number;
           out_was_correct: boolean;
           out_percent_correct: number;
@@ -363,6 +401,8 @@ export interface Database {
       answer_option: AnswerOptionRow;
       game_mode: GameModeRow;
       answer_behavior: AnswerBehaviorRow;
+      /** Added 0026_question_types_phase1.sql. */
+      question_type: QuestionTypeRow;
     };
   };
 }

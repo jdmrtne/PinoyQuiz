@@ -59,6 +59,7 @@ export default function CreateGame() {
   const [answerBehavior, setAnswerBehavior] = useState<AnswerBehaviorRow>(
     "LOCK_ON_SELECTION"
   );
+  const [includeNewQuestionTypes, setIncludeNewQuestionTypes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -87,6 +88,7 @@ export default function CreateGame() {
         hostNickname: nickname.trim(),
         gameMode,
         answerBehavior,
+        includeNewQuestionTypes,
       });
       navigate(`/game/${result.roomCode}`, {
         state: { playerId: result.playerId, isHost: true },
@@ -270,6 +272,26 @@ export default function CreateGame() {
                 {ANSWER_BEHAVIOR_DESCRIPTIONS[answerBehavior]}
               </p>
             </div>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeNewQuestionTypes}
+                onChange={(e) => setIncludeNewQuestionTypes(e.target.checked)}
+                className="mt-1 w-5 h-5 rounded border-ink-3 accent-mango flex-shrink-0"
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm font-semibold text-sampaguita/80">
+                  Include new question types{" "}
+                  <span className="text-mango">(Beta)</span>
+                </span>
+                <span className="text-xs text-sampaguita/50">
+                  Mixes in True/False, Identification, and Fill-in-the-Blank
+                  questions alongside Multiple Choice. Off by default —
+                  Classic games stay Multiple Choice only.
+                </span>
+              </span>
+            </label>
 
             {error && (
               <p role="alert" className="text-sm text-sunset -mt-2">
