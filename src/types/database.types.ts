@@ -83,7 +83,8 @@ export type QuestionTypeRow =
   | "fill_blank"
   | "unscramble"
   | "matching"
-  | "image";
+  | "image"
+  | "sequence";
 
 // Added in 0015_automatic_mode_and_answer_behavior.sql. Both default to the
 // pre-existing (only) behavior — HOST_CONTROLLED / LOCK_ON_SELECTION — so
@@ -128,6 +129,8 @@ export interface Database {
           round_number: number;
           /** Added 0026_question_types_phase1.sql — opt-in to draw true_false/identification/fill_blank alongside multiple_choice. */
           include_new_question_types: boolean;
+          /** Added 0030_question_types_phase3.sql — explicit Mixed Mode type selection. Null falls back to include_new_question_types. */
+          enabled_question_types: QuestionTypeRow[] | null;
           created_at: string;
           started_at: string | null;
           finished_at: string | null;
@@ -179,6 +182,10 @@ export interface Database {
           /** Added 0028 — required (aligned by index) for matching, null otherwise. */
           match_terms: string[] | null;
           match_definitions: string[] | null;
+          /** Added 0030_question_types_phase3.sql — required (2-8 items) for sequence, null otherwise. */
+          sequence_items: string[] | null;
+          /** Added 0030 — per-question timer override in seconds, any type. Null means "use this game's time_limit_seconds". */
+          time_limit_override: number | null;
           explanation: string | null;
           created_at: string;
         };
@@ -198,6 +205,8 @@ export interface Database {
           unscramble_letters: string[] | null;
           /** Added 0028 — per-game displayed-slot mapping for matching, same convention as shuffle_map. */
           match_shuffle: number[] | null;
+          /** Added 0030_question_types_phase3.sql — per-game displayed-slot mapping for sequence, same convention as shuffle_map. */
+          sequence_shuffle: number[] | null;
         };
         Insert: Partial<Database["public"]["Tables"]["game_questions"]["Row"]>;
         Update: Partial<Database["public"]["Tables"]["game_questions"]["Row"]>;
@@ -215,6 +224,8 @@ export interface Database {
           submitted_text: string | null;
           /** Added 0028_question_types_phase2.sql — this player's proposed pairing for a matching question. */
           submitted_pairing: number[] | null;
+          /** Added 0030_question_types_phase3.sql — this player's proposed arrangement for a sequence question. */
+          submitted_sequence: number[] | null;
           is_correct: boolean;
           response_time_ms: number | null;
           points: number;
@@ -266,6 +277,8 @@ export interface Database {
           p_categories?: QuestionCategoryRow[] | null;
           /** Added 0026_question_types_phase1.sql. Defaults to false server-side. */
           p_include_new_question_types?: boolean;
+          /** Added 0030_question_types_phase3.sql — explicit Mixed Mode type selection; takes precedence over p_include_new_question_types when set. */
+          p_enabled_question_types?: QuestionTypeRow[] | null;
         };
         Returns: {
           out_game_id: string;
@@ -328,8 +341,11 @@ export interface Database {
           out_match_terms: string[] | null;
           /** Added 0028 — matching only, in shuffled *displayed* order. */
           out_match_definitions: string[] | null;
+          /** Added 0030_question_types_phase3.sql — sequence only, in shuffled *displayed* order. */
+          out_sequence_items: string[] | null;
           out_order: number;
           out_total: number;
+          /** Effective per-question value (questions.time_limit_override if set, else the game's default) as of 0030. */
           out_time_limit_seconds: number;
           out_question_started_at: string;
         }[];
@@ -357,6 +373,14 @@ export interface Database {
           out_points: number;
         }[];
       };
+      /** Added 0030_question_types_phase3.sql — sequence counterpart to submit_answer. */
+      submit_sequence_answer: {
+        Args: { p_game_id: string; p_order: number[] };
+        Returns: {
+          out_is_correct: boolean;
+          out_points: number;
+        }[];
+      };
       end_question: {
         Args: { p_game_id: string };
         Returns: undefined;
@@ -378,6 +402,10 @@ export interface Database {
           out_match_definitions: string[] | null;
           /** Added 0028 — matching only, this player's submitted pairing. */
           out_your_pairing: number[] | null;
+          /** Added 0030_question_types_phase3.sql — sequence only, canonical (unshuffled) order. */
+          out_sequence_items: string[] | null;
+          /** Added 0030 — sequence only, this player's submitted arrangement. */
+          out_your_sequence: number[] | null;
           out_explanation: string | null;
           out_your_answer: number | null;
           /** Added 0026 — this player's typed submission, text-answer types only. */

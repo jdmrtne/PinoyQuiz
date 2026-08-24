@@ -37,7 +37,8 @@ export type QuestionType =
   | "fill_blank"
   | "unscramble"
   | "matching"
-  | "image";
+  | "image"
+  | "sequence";
 
 /** Added alongside 0015_automatic_mode_and_answer_behavior.sql. */
 export type GameMode = "HOST_CONTROLLED" | "AUTOMATIC";
@@ -52,6 +53,8 @@ export interface GameSettings {
   answerBehavior: AnswerBehavior;
   /** Added Phase 1 of the question-types work — opt in to true_false/identification/fill_blank alongside multiple_choice. */
   includeNewQuestionTypes?: boolean;
+  /** Added Phase 3 of the question-types work — explicit Mixed Mode type selection; takes precedence over includeNewQuestionTypes when set. */
+  enabledQuestionTypes?: QuestionType[];
 }
 
 export interface Game {
@@ -96,6 +99,8 @@ export interface ClientQuestion {
   matchTerms: string[] | null;
   /** matching only, in shuffled displayed order. */
   matchDefinitions: string[] | null;
+  /** sequence only, in shuffled displayed order. */
+  sequenceItems: string[] | null;
   order: number;
   totalQuestions: number;
 }
@@ -115,6 +120,10 @@ export interface AnswerReveal {
   matchDefinitions: string[] | null;
   /** matching only — this player's submitted pairing. */
   yourPairing: number[] | null;
+  /** sequence only, canonical (unshuffled) order. */
+  sequenceItems: string[] | null;
+  /** sequence only — this player's submitted arrangement. */
+  yourSequence: number[] | null;
   explanation?: string;
   yourAnswerIndex: number | null;
   /** This player's typed submission — text-answer types only. */

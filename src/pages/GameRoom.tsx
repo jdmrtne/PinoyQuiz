@@ -23,6 +23,7 @@ import {
   submitAnswer,
   submitTextAnswer,
   submitMatchingAnswer,
+  submitSequenceAnswer,
   endQuestion,
   getAnswerReveal,
   advanceToLeaderboard,
@@ -47,6 +48,7 @@ export default function GameRoom() {
   const [answeredIndex, setAnsweredIndex] = useState<number | null>(null);
   const [answeredText, setAnsweredText] = useState<string | null>(null);
   const [answeredPairing, setAnsweredPairing] = useState<number[] | null>(null);
+  const [answeredSequence, setAnsweredSequence] = useState<number[] | null>(null);
   const [reveal, setReveal] = useState<AnswerReveal | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [advancing, setAdvancing] = useState(false);
@@ -139,6 +141,7 @@ export default function GameRoom() {
     setAnsweredIndex(null);
     setAnsweredText(null);
     setAnsweredPairing(null);
+    setAnsweredSequence(null);
   }, [game?.current_question_id]);
 
   // Fetch the reveal payload whenever the game enters REVEAL state.
@@ -314,6 +317,23 @@ export default function GameRoom() {
     }
   }
 
+  async function handleAnswerSequence(order: number[]) {
+    if (!game) return;
+    const canChangeAnswer = game.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS";
+    if (!canChangeAnswer && answeredSequence !== null) return;
+    setActionError(null);
+    const previous = answeredSequence;
+    setAnsweredSequence(order); // optimistic — locks/updates the UI immediately
+    try {
+      await submitSequenceAnswer(game.id, order);
+    } catch (err) {
+      setAnsweredSequence(previous); // revert to whatever was actually locked in
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't submit your answer."
+      );
+    }
+  }
+
   async function handleRemove(playerId: string) {
     setActionError(null);
     try {
@@ -438,9 +458,11 @@ export default function GameRoom() {
           answeredIndex={answeredIndex}
           answeredText={answeredText}
           answeredPairing={answeredPairing}
+          answeredSequence={answeredSequence}
           onAnswer={handleAnswer}
           onAnswerText={handleAnswerText}
           onAnswerPairing={handleAnswerPairing}
+          onAnswerSequence={handleAnswerSequence}
           canChangeAnswer={game.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS"}
           isAutomatic={isAutomatic}
         />

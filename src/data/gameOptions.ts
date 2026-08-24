@@ -4,6 +4,7 @@ import type {
   GameModeRow,
   AnswerBehaviorRow,
   QuestionCategoryRow,
+  QuestionTypeRow,
 } from "../types/database.types";
 
 export const CATEGORY_LABELS: Record<GameCategorySetting, string> = {
@@ -223,4 +224,35 @@ export const ANSWER_BEHAVIOR_DESCRIPTIONS: Record<AnswerBehaviorRow, string> = {
 export const ANSWER_BEHAVIOR_OPTIONS: AnswerBehaviorRow[] = [
   "LOCK_ON_SELECTION",
   "CHANGE_UNTIL_TIMER_ENDS",
+];
+
+// Added Question-Types Phase 3 (0030_question_types_phase3.sql) — Mixed
+// Mode's explicit type picker. multiple_choice is deliberately absent
+// from this list: it's always included (see CreateGame.tsx, which
+// prepends it before sending enabledQuestionTypes), so there's no pill
+// for something that can't actually be turned off.
+export const OPTIONAL_QUESTION_TYPE_LABELS: Record<
+  Exclude<QuestionTypeRow, "multiple_choice">,
+  string
+> = {
+  true_false: "True/False",
+  identification: "Identification",
+  fill_blank: "Fill in the Blank",
+  unscramble: "Unscramble",
+  matching: "Matching",
+  image: "Image ID",
+  sequence: "Sequence",
+};
+
+export const OPTIONAL_QUESTION_TYPE_OPTIONS: Exclude<
+  QuestionTypeRow,
+  "multiple_choice"
+>[] = [
+  "true_false",
+  "identification",
+  "fill_blank",
+  "unscramble",
+  "matching",
+  "image",
+  "sequence",
 ];

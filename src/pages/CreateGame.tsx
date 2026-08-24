@@ -21,6 +21,8 @@ import {
   ANSWER_BEHAVIOR_LABELS,
   ANSWER_BEHAVIOR_DESCRIPTIONS,
   ANSWER_BEHAVIOR_OPTIONS,
+  OPTIONAL_QUESTION_TYPE_LABELS,
+  OPTIONAL_QUESTION_TYPE_OPTIONS,
 } from "../data/gameOptions";
 import { createGame, GameApiError } from "../lib/gameApi";
 import type {
@@ -29,6 +31,7 @@ import type {
   GameModeRow,
   AnswerBehaviorRow,
   QuestionCategoryRow,
+  QuestionTypeRow,
 } from "../types/database.types";
 
 type CategoryMode = "single" | "custom";
@@ -59,7 +62,10 @@ export default function CreateGame() {
   const [answerBehavior, setAnswerBehavior] = useState<AnswerBehaviorRow>(
     "LOCK_ON_SELECTION"
   );
-  const [includeNewQuestionTypes, setIncludeNewQuestionTypes] = useState(false);
+  const [mixedModeOn, setMixedModeOn] = useState(false);
+  const [extraQuestionTypes, setExtraQuestionTypes] = useState<
+    Exclude<QuestionTypeRow, "multiple_choice">[]
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -88,7 +94,19 @@ export default function CreateGame() {
         hostNickname: nickname.trim(),
         gameMode,
         answerBehavior,
-        includeNewQuestionTypes,
+        // Real Mixed Mode (Question-Types Phase 3) supersedes the old
+        // include_new_question_types on/off toggle for this form —
+        // enabledQuestionTypes is sent instead when Mixed Mode is on, so
+        // includeNewQuestionTypes always stays false from here. It's
+        // still a valid standalone param for anything calling createGame
+        // directly (see that param's doc comment in gameApi.ts).
+        // Real Mixed Mode: multiple_choice is always included (there's no
+        // pill to remove it — see OPTIONAL_QUESTION_TYPE_OPTIONS), so it's
+        // prepended here rather than making the picker redundantly offer
+        // to turn off the one type every game has always had.
+        enabledQuestionTypes: mixedModeOn
+          ? (["multiple_choice", ...extraQuestionTypes] as QuestionTypeRow[])
+          : undefined,
       });
       navigate(`/game/${result.roomCode}`, {
         state: { playerId: result.playerId, isHost: true },
@@ -273,26 +291,41 @@ export default function CreateGame() {
               </p>
             </div>
 
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={includeNewQuestionTypes}
-                onChange={(e) => setIncludeNewQuestionTypes(e.target.checked)}
-                className="mt-1 w-5 h-5 rounded border-ink-3 accent-mango flex-shrink-0"
-              />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-sm font-semibold text-sampaguita/80">
-                  Include new question types{" "}
-                  <span className="text-mango">(Beta)</span>
+            <div className="flex flex-col gap-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={mixedModeOn}
+                  onChange={(e) => setMixedModeOn(e.target.checked)}
+                  className="mt-1 w-5 h-5 rounded border-ink-3 accent-mango flex-shrink-0"
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-sm font-semibold text-sampaguita/80">
+                    Mixed Mode <span className="text-mango">(Beta)</span>
+                  </span>
+                  <span className="text-xs text-sampaguita/50">
+                    Draw from more question types than just Multiple
+                    Choice. Off by default — Classic games stay Multiple
+                    Choice only.
+                  </span>
                 </span>
-                <span className="text-xs text-sampaguita/50">
-                  Mixes in True/False, Identification, Fill-in-the-Blank,
-                  Unscramble, Matching, and Image ID questions alongside
-                  Multiple Choice. Off by default — Classic games stay
-                  Multiple Choice only.
-                </span>
-              </span>
-            </label>
+              </label>
+
+              {mixedModeOn && (
+                <div className="flex flex-col gap-2 pl-8">
+                  <span className="text-xs text-sampaguita/50">
+                    Multiple Choice is always included. Pick any others to
+                    mix in:
+                  </span>
+                  <MultiSelectPills
+                    options={OPTIONAL_QUESTION_TYPE_OPTIONS}
+                    value={extraQuestionTypes}
+                    onChange={setExtraQuestionTypes}
+                    labels={OPTIONAL_QUESTION_TYPE_LABELS}
+                  />
+                </div>
+              )}
+            </div>
 
             {error && (
               <p role="alert" className="text-sm text-sunset -mt-2">

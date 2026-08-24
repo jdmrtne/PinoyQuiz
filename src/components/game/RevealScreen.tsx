@@ -35,11 +35,14 @@ export function RevealScreen({
     reveal.questionType === "image";
   const isTrueFalse = reveal.questionType === "true_false";
   const isMatching = reveal.questionType === "matching";
+  const isSequence = reveal.questionType === "sequence";
   const noAnswer = isMatching
     ? reveal.yourPairing === null
-    : isTextType
-      ? reveal.yourTextAnswer === null
-      : reveal.yourAnswerIndex === null;
+    : isSequence
+      ? reveal.yourSequence === null
+      : isTextType
+        ? reveal.yourTextAnswer === null
+        : reveal.yourAnswerIndex === null;
 
   return (
     <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
@@ -79,6 +82,8 @@ export function RevealScreen({
 
         {isMatching ? (
           <MatchingReveal reveal={reveal} />
+        ) : isSequence ? (
+          <SequenceReveal reveal={reveal} />
         ) : isTextType ? (
           <TextReveal reveal={reveal} noAnswer={noAnswer} />
         ) : (
@@ -269,6 +274,42 @@ function MatchingReveal({ reveal }: { reveal: AnswerReveal }) {
       {!attempted && (
         <p className="text-xs text-center text-sampaguita/40 mt-1">
           You didn't finish matching before time ran out.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * out_sequence_items comes back in canonical (correct) order from
+ * get_answer_reveal — just show the correct order in a numbered list,
+ * same "canonical, not shuffled, reveal isn't a live quiz" choice as
+ * MatchingReveal above.
+ */
+function SequenceReveal({ reveal }: { reveal: AnswerReveal }) {
+  const items = reveal.sequenceItems ?? [];
+  const attempted = reveal.yourSequence !== null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {items.map((item, i) => (
+        <div
+          key={i}
+          className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-sm font-semibold ${
+            reveal.wasCorrect
+              ? "border-bagoong bg-bagoong/10 text-sampaguita"
+              : "border-ink-3 bg-ink-2 text-sampaguita/80"
+          }`}
+        >
+          <span className="flex items-center justify-center w-7 h-7 rounded-full bg-bagoong text-ink font-display font-bold flex-shrink-0">
+            {i + 1}
+          </span>
+          {item}
+        </div>
+      ))}
+      {!attempted && (
+        <p className="text-xs text-center text-sampaguita/40 mt-1">
+          You didn't finish arranging before time ran out.
         </p>
       )}
     </div>

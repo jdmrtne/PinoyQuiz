@@ -56,6 +56,8 @@ export function friendlyMessage(raw: string): string {
     // Added 0028_question_types_phase2.sql
     "This question needs a different kind of answer",
     "You need to match every term before submitting",
+    // Added 0030_question_types_phase3.sql
+    "You need to place every item before submitting",
   ];
   const match = known.find((m) => raw.includes(m));
   return match ? raw : "Something went wrong. Please try again.";
@@ -104,6 +106,12 @@ export interface CreateGameParams {
    * identification/fill_blank too.
    */
   includeNewQuestionTypes?: boolean;
+  /**
+   * Phase 3 of the question-types work (0030 migration) — explicit Mixed
+   * Mode type selection. Takes precedence over includeNewQuestionTypes
+   * when set (see resolve_enabled_question_types in that migration).
+   */
+  enabledQuestionTypes?: QuestionTypeRow[];
 }
 
 export interface CreateGameResult {
@@ -125,6 +133,7 @@ export async function createGame(
     p_answer_behavior: params.answerBehavior,
     p_categories: params.categories,
     p_include_new_question_types: params.includeNewQuestionTypes,
+    p_enabled_question_types: params.enabledQuestionTypes,
   });
   return {
     gameId: row.out_game_id,
@@ -192,6 +201,8 @@ export interface CurrentQuestion {
   matchTerms: string[] | null;
   /** matching only, in shuffled displayed order. */
   matchDefinitions: string[] | null;
+  /** sequence only, in shuffled displayed order. */
+  sequenceItems: string[] | null;
   order: number;
   total: number;
   timeLimitSeconds: number;
@@ -218,6 +229,7 @@ export async function getCurrentQuestion(
     scrambleLetters: row.out_scramble_letters,
     matchTerms: row.out_match_terms,
     matchDefinitions: row.out_match_definitions,
+    sequenceItems: row.out_sequence_items,
     order: row.out_order,
     total: row.out_total,
     timeLimitSeconds: row.out_time_limit_seconds,
@@ -280,6 +292,23 @@ export async function submitMatchingAnswer(
   return { isCorrect: row.out_is_correct, points: row.out_points };
 }
 
+/**
+ * sequence counterpart to submitAnswer. order[i] is the *displayed* item
+ * slot the player placed at chronological position i (matching
+ * CurrentQuestion.sequenceItems order) — grading happens server-side in
+ * submit_sequence_answer.
+ */
+export async function submitSequenceAnswer(
+  gameId: string,
+  order: number[]
+): Promise<SubmitAnswerResult> {
+  const row = await callRpc("submit_sequence_answer", {
+    p_game_id: gameId,
+    p_order: order,
+  });
+  return { isCorrect: row.out_is_correct, points: row.out_points };
+}
+
 /** Host-only. Flips QUESTION -> REVEAL, filling in "no answer" rows for anyone who didn't submit in time. */
 export async function endQuestion(gameId: string): Promise<void> {
   await callRpc("end_question", { p_game_id: gameId });
@@ -314,6 +343,8 @@ export async function getAnswerReveal(
     matchTerms: row.out_match_terms,
     matchDefinitions: row.out_match_definitions,
     yourPairing: row.out_your_pairing,
+    sequenceItems: row.out_sequence_items,
+    yourSequence: row.out_your_sequence,
     explanation: row.out_explanation ?? undefined,
     yourAnswerIndex: row.out_your_answer,
     yourTextAnswer: row.out_your_text_answer,

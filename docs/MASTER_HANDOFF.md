@@ -635,9 +635,11 @@ Started by explicit request, not part of the original spec the numbered
 phases above were built against — tracked with its own "Question-Types
 Phase N" numbering so it doesn't collide with the real Phase 1-15
 history. Migrations: `0026_question_types_phase1.sql`,
-`0027_question_types_phase2_enum.sql`, `0028_question_types_phase2.sql`.
+`0027_question_types_phase2_enum.sql`, `0028_question_types_phase2.sql`,
+`0029_question_types_phase3_enum.sql`, `0030_question_types_phase3.sql`.
 Seeds: `supabase/seed/0002_phase1_question_types_sample.sql`,
-`supabase/seed/0003_phase2_question_types_sample.sql`.
+`supabase/seed/0003_phase2_question_types_sample.sql`,
+`supabase/seed/0004_phase3_question_types_sample.sql`.
 
 **Question-Types Phase 1 — done.** True/False, Identification,
 Fill-in-the-Blank alongside the original Multiple Choice. `questions`
@@ -666,24 +668,53 @@ all-or-nothing (every term paired to its correct definition) — per-pair
 partial credit would be a reasonable later extension but wasn't added
 now per the brief's "don't add fields/behavior that isn't needed yet."
 
-**Not done yet, in priority order per the original brief:** Sequence/
-Arrange, Timed Challenge (a real per-question configurable timer + speed
-bonus UI — note base speed bonus scoring already exists from the
-original engine), real Mixed/Random mode (today's
-`include_new_question_types` is a blunt on/off, not per-question-type
-selection or weighting), Streaks, Difficulty-driven config, the
-remaining named game modes (Speed Challenge/Brain Challenge/Survival/
-Daily Challenge), and an admin/question-authoring UI (every question
-above was seeded via SQL — there is still no in-app way to create one).
+**Question-Types Phase 3 — done.** Sequence/Arrange, per-question
+configurable timers, and real Mixed Mode. Sequence grades through a new
+`submit_sequence_answer`, structurally identical to Phase 2's
+`submit_matching_answer` (server shuffles a display order once at
+`start_game` into `game_questions.sequence_shuffle`, player proposes a
+displayed-slot arrangement, grading decodes it back against the shuffle)
+— all-or-nothing, same reasoning as Matching. `questions` gained
+`time_limit_override` (nullable, 5-120s; null means "use this game's
+`time_limit_seconds`", the same as every question before this migration)
+and `sequence_items`. Every answer-submission function
+(`submit_answer`/`submit_text_answer`/`submit_matching_answer`/
+`submit_sequence_answer`) and `auto_advance_game` were updated to use
+the effective per-question limit instead of the flat game-level one —
+`auto_advance_game` was the one place still reading
+`games.time_limit_seconds` directly, since `get_current_question`
+already returned per-question data and the HOST_CONTROLLED client
+already read `out_time_limit_seconds` from there. `games` gained
+`enabled_question_types` (nullable array) as the real Mixed Mode
+selector; a new `resolve_enabled_question_types()` SQL function is the
+single place the fallback chain lives (explicit array → old
+`include_new_question_types` boolean → `multiple_choice` only), so
+`include_new_question_types` keeps working unchanged for any caller that
+never sends the new param. CreateGame.tsx's old blunt "Include new
+question types (Beta)" checkbox was replaced with a proper picker
+(toggle + a pill per type, Multiple Choice always implicitly included).
+
+**Not done yet, in priority order per the original brief:** Streaks,
+Difficulty-driven config (question selection/timer/points varying by
+difficulty — `question_difficulty` already exists and is already a
+selection filter, but nothing yet *derives* a timer or point value from
+it), the remaining named game modes (Speed Challenge/Brain
+Challenge/Survival/Daily Challenge — a host can approximate Speed
+Challenge today by combining a short `time_limit_seconds` with per-
+question `time_limit_override`s, but there's no dedicated mode UI/preset
+for any of the four), and an admin/question-authoring UI (every question
+across all three phases was seeded via SQL — there is still no in-app
+way to create one).
 
 **Rules for continuing this track**, same spirit as the "Don't relitigate
 past decisions" section above:
 - Redefine functions from their *latest* version, not whatever an older
-  migration file shows — trace forward from 0028, the same way 0028 was
-  built by tracing 0022/0016 forward rather than 0010/0011's originals.
-  Regressing custom-category-mix, Play Again/no-repeat-questions, or rate
-  limiting while adding a question type is the most likely way to
-  quietly break something that already worked.
+  migration file shows — trace forward from 0030, the same way 0030 was
+  built by tracing 0028 forward (which itself traced 0022/0016, rather
+  than 0010/0011's originals). Regressing custom-category-mix, Play
+  Again/no-repeat-questions, rate limiting, or per-question timers while
+  adding a question type is the most likely way to quietly break
+  something that already worked.
 - New question_type enum values need their own migration/transaction
   before anything can use them (`0027` exists solely for this reason) —
   Postgres rejects referencing a new enum value in the same transaction

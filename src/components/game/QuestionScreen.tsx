@@ -11,9 +11,11 @@ export function QuestionScreen({
   answeredIndex,
   answeredText,
   answeredPairing,
+  answeredSequence,
   onAnswer,
   onAnswerText,
   onAnswerPairing,
+  onAnswerSequence,
   canChangeAnswer,
   isAutomatic,
 }: {
@@ -24,9 +26,12 @@ export function QuestionScreen({
   answeredText: string | null;
   /** This player's already-submitted pairing (matching), or null if not answered yet. */
   answeredPairing: number[] | null;
+  /** This player's already-submitted arrangement (sequence), or null if not answered yet. */
+  answeredSequence: number[] | null;
   onAnswer: (index: number) => void;
   onAnswerText: (text: string) => void;
   onAnswerPairing: (pairing: number[]) => void;
+  onAnswerSequence: (order: number[]) => void;
   /** true when games.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS" — an
    * already-picked/typed/matched answer stays editable right up until the
    * timer runs out, instead of locking on first submission. */
@@ -47,12 +52,15 @@ export function QuestionScreen({
     question.questionType === "image";
   const isTrueFalse = question.questionType === "true_false";
   const isMatching = question.questionType === "matching";
+  const isSequence = question.questionType === "sequence";
 
   const hasAnswered = isMatching
     ? answeredPairing !== null
-    : isTextType
-      ? answeredText !== null
-      : answeredIndex !== null;
+    : isSequence
+      ? answeredSequence !== null
+      : isTextType
+        ? answeredText !== null
+        : answeredIndex !== null;
 
   return (
     <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
@@ -96,6 +104,14 @@ export function QuestionScreen({
             definitions={question.matchDefinitions ?? []}
             answeredPairing={answeredPairing}
             onSubmit={onAnswerPairing}
+            canChangeAnswer={canChangeAnswer}
+            timeUp={timeUp}
+          />
+        ) : isSequence ? (
+          <SequenceBoard
+            items={question.sequenceItems ?? []}
+            answeredSequence={answeredSequence}
+            onSubmit={onAnswerSequence}
             canChangeAnswer={canChangeAnswer}
             timeUp={timeUp}
           />
@@ -437,6 +453,98 @@ function MatchingBoard({
         {selectedTerm !== null
           ? "Now tap the matching definition on the right."
           : "Tap a term, then tap its definition."}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Tap items in the order you believe is correct (e.g. earliest event
+ * first). Tap a placed item's number badge to pull it back out and
+ * re-place it. Submits automatically once every item has been placed —
+ * same auto-submit-on-complete reasoning as MatchingBoard above.
+ */
+function SequenceBoard({
+  items,
+  answeredSequence,
+  onSubmit,
+  canChangeAnswer,
+  timeUp,
+}: {
+  items: string[];
+  answeredSequence: number[] | null;
+  onSubmit: (order: number[]) => void;
+  canChangeAnswer: boolean;
+  timeUp: boolean;
+}) {
+  const hasAnswered = answeredSequence !== null;
+  const locked = (hasAnswered && !canChangeAnswer) || timeUp;
+
+  // order = displayed item slots, in the sequence chosen so far.
+  const [order, setOrder] = useState<number[]>(() => answeredSequence ?? []);
+
+  useEffect(() => {
+    setOrder(answeredSequence ?? []);
+  }, [answeredSequence]);
+
+  const placedSet = new Set(order);
+
+  function place(slot: number) {
+    if (locked || placedSet.has(slot)) return;
+    const next = [...order, slot];
+    setOrder(next);
+    if (next.length === items.length) {
+      onSubmit(next);
+    }
+  }
+
+  function removeAt(position: number) {
+    if (locked) return;
+    setOrder(order.filter((_, i) => i !== position));
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {order.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {order.map((slot, position) => (
+            <button
+              key={position}
+              type="button"
+              disabled={locked}
+              onClick={() => removeAt(position)}
+              className={`flex items-center gap-3 rounded-xl border-2 border-bagoong bg-bagoong/10 px-3 py-3 text-left text-sm font-semibold text-sampaguita ${
+                locked ? "cursor-default" : "cursor-pointer"
+              }`}
+            >
+              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-bagoong text-ink font-display font-bold flex-shrink-0">
+                {position + 1}
+              </span>
+              {items[slot]}
+            </button>
+          ))}
+        </div>
+      )}
+      {!locked && order.length < items.length && (
+        <div className="flex flex-wrap gap-2">
+          {items.map((item, slot) =>
+            placedSet.has(slot) ? null : (
+              <button
+                key={slot}
+                type="button"
+                onClick={() => place(slot)}
+                className="rounded-xl border-2 border-ink-3 bg-ink-2 px-4 py-3 text-sm font-semibold text-sampaguita/90 cursor-pointer hover:border-mango/60"
+              >
+                {item}
+              </button>
+            )
+          )}
+        </div>
+      )}
+      <p className="text-xs text-center text-sampaguita/40">
+        {order.length === 0
+          ? "Tap items in order — earliest/first to latest/last."
+          : "Tap a placed item to move it back and re-place it."}
       </p>
     </div>
   );
