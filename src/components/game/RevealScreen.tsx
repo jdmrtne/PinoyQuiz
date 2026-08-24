@@ -6,11 +6,12 @@ const OPTION_LETTERS = ["A", "B", "C", "D"] as const;
 
 /**
  * Shown once the game moves QUESTION -> REVEAL. Re-renders the same prompt
- * the player just saw, then either the choice grid (multiple_choice/
- * true_false — highlighting the correct one in bagoong and this player's
- * own wrong pick in sunset, matching the *displayed* slot order) or the
- * typed-answer comparison (identification/fill_blank — showing the
- * canonical correct_answer alongside whatever this player typed).
+ * the player just saw, then branches by question type:
+ *   - multiple_choice/true_false: the choice grid, correct one highlighted
+ *     in bagoong, this player's own wrong pick (if any) in sunset.
+ *   - identification/fill_blank/unscramble/image: this player's typed
+ *     answer next to the canonical correct_answer.
+ *   - matching: the full term/definition board with right/wrong lines.
  */
 export function RevealScreen({
   question,
@@ -28,11 +29,17 @@ export function RevealScreen({
   advancing: boolean;
 }) {
   const isTextType =
-    reveal.questionType === "identification" || reveal.questionType === "fill_blank";
+    reveal.questionType === "identification" ||
+    reveal.questionType === "fill_blank" ||
+    reveal.questionType === "unscramble" ||
+    reveal.questionType === "image";
   const isTrueFalse = reveal.questionType === "true_false";
-  const noAnswer = isTextType
-    ? reveal.yourTextAnswer === null
-    : reveal.yourAnswerIndex === null;
+  const isMatching = reveal.questionType === "matching";
+  const noAnswer = isMatching
+    ? reveal.yourPairing === null
+    : isTextType
+      ? reveal.yourTextAnswer === null
+      : reveal.yourAnswerIndex === null;
 
   return (
     <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
@@ -60,7 +67,19 @@ export function RevealScreen({
           </h1>
         </Card>
 
-        {isTextType ? (
+        {reveal.questionType === "image" && reveal.imageUrl && (
+          <Card className="p-2 overflow-hidden">
+            <img
+              src={reveal.imageUrl}
+              alt="Identify this"
+              className="w-full max-h-72 object-cover rounded-xl"
+            />
+          </Card>
+        )}
+
+        {isMatching ? (
+          <MatchingReveal reveal={reveal} />
+        ) : isTextType ? (
           <TextReveal reveal={reveal} noAnswer={noAnswer} />
         ) : (
           <ChoiceReveal
@@ -211,6 +230,46 @@ function TextReveal({
           </p>
           {reveal.correctAnswer}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * out_match_terms/out_match_definitions come back in canonical (unshuffled)
+ * order from get_answer_reveal, so yourPairing[i] (a displayed-slot index
+ * from when the question was live) can't be zipped directly against them
+ * anymore — instead we just show, per term, whether it was ever paired and
+ * whether the whole set was correct (Phase 2 grades all-or-nothing; see
+ * that migration's comment on submit_matching_answer for why per-pair
+ * detail isn't shown here).
+ */
+function MatchingReveal({ reveal }: { reveal: AnswerReveal }) {
+  const terms = reveal.matchTerms ?? [];
+  const definitions = reveal.matchDefinitions ?? [];
+  const attempted = reveal.yourPairing !== null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {terms.map((term, i) => (
+        <div
+          key={i}
+          className={`rounded-xl border-2 px-4 py-3 text-sm font-semibold ${
+            reveal.wasCorrect
+              ? "border-bagoong bg-bagoong/10 text-sampaguita"
+              : "border-ink-3 bg-ink-2 text-sampaguita/80"
+          }`}
+        >
+          {term}
+          <span className="block text-xs text-bagoong mt-0.5">
+            → {definitions[i]}
+          </span>
+        </div>
+      ))}
+      {!attempted && (
+        <p className="text-xs text-center text-sampaguita/40 mt-1">
+          You didn't finish matching before time ran out.
+        </p>
       )}
     </div>
   );

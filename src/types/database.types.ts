@@ -80,7 +80,10 @@ export type QuestionTypeRow =
   | "multiple_choice"
   | "true_false"
   | "identification"
-  | "fill_blank";
+  | "fill_blank"
+  | "unscramble"
+  | "matching"
+  | "image";
 
 // Added in 0015_automatic_mode_and_answer_behavior.sql. Both default to the
 // pre-existing (only) behavior — HOST_CONTROLLED / LOCK_ON_SELECTION — so
@@ -171,6 +174,11 @@ export interface Database {
           /** Added 0026 — required for identification/fill_blank, null otherwise. */
           correct_answer: string | null;
           acceptable_answers: string[] | null;
+          /** Added 0028_question_types_phase2.sql — required for image, null otherwise. */
+          image_url: string | null;
+          /** Added 0028 — required (aligned by index) for matching, null otherwise. */
+          match_terms: string[] | null;
+          match_definitions: string[] | null;
           explanation: string | null;
           created_at: string;
         };
@@ -186,6 +194,10 @@ export interface Database {
           question_order: number;
           round_number: number;
           shuffle_map: number[];
+          /** Added 0028_question_types_phase2.sql — per-game shuffled letters for unscramble. */
+          unscramble_letters: string[] | null;
+          /** Added 0028 — per-game displayed-slot mapping for matching, same convention as shuffle_map. */
+          match_shuffle: number[] | null;
         };
         Insert: Partial<Database["public"]["Tables"]["game_questions"]["Row"]>;
         Update: Partial<Database["public"]["Tables"]["game_questions"]["Row"]>;
@@ -201,6 +213,8 @@ export interface Database {
           selected_option: number | null;
           /** Added 0026_question_types_phase1.sql — typed answer for identification/fill_blank. */
           submitted_text: string | null;
+          /** Added 0028_question_types_phase2.sql — this player's proposed pairing for a matching question. */
+          submitted_pairing: number[] | null;
           is_correct: boolean;
           response_time_ms: number | null;
           points: number;
@@ -306,6 +320,14 @@ export interface Database {
           out_option_2: string | null;
           out_option_3: string | null;
           out_option_4: string | null;
+          /** Added 0028_question_types_phase2.sql — image type only. */
+          out_image_url: string | null;
+          /** Added 0028 — unscramble only, per-game shuffled letters. */
+          out_scramble_letters: string[] | null;
+          /** Added 0028 — matching only. */
+          out_match_terms: string[] | null;
+          /** Added 0028 — matching only, in shuffled *displayed* order. */
+          out_match_definitions: string[] | null;
           out_order: number;
           out_total: number;
           out_time_limit_seconds: number;
@@ -319,9 +341,17 @@ export interface Database {
           out_points: number;
         }[];
       };
-      /** Added 0026_question_types_phase1.sql — identification/fill_blank counterpart to submit_answer. */
+      /** Added 0026_question_types_phase1.sql — identification/fill_blank/unscramble/image counterpart to submit_answer. */
       submit_text_answer: {
         Args: { p_game_id: string; p_answer_text: string };
+        Returns: {
+          out_is_correct: boolean;
+          out_points: number;
+        }[];
+      };
+      /** Added 0028_question_types_phase2.sql — matching counterpart to submit_answer. */
+      submit_matching_answer: {
+        Args: { p_game_id: string; p_pairing: number[] };
         Returns: {
           out_is_correct: boolean;
           out_points: number;
@@ -339,11 +369,18 @@ export interface Database {
           out_question_type: QuestionTypeRow;
           out_correct_option: number | null;
           out_correct_text: string | null;
-          /** Added 0026 — canonical typed answer, identification/fill_blank only. */
+          /** Added 0026 — canonical typed answer, identification/fill_blank/unscramble/image only. */
           out_correct_answer: string | null;
+          /** Added 0028_question_types_phase2.sql — image only. */
+          out_image_url: string | null;
+          /** Added 0028 — matching only, canonical (unshuffled) order. */
+          out_match_terms: string[] | null;
+          out_match_definitions: string[] | null;
+          /** Added 0028 — matching only, this player's submitted pairing. */
+          out_your_pairing: number[] | null;
           out_explanation: string | null;
           out_your_answer: number | null;
-          /** Added 0026 — this player's typed submission, identification/fill_blank only. */
+          /** Added 0026 — this player's typed submission, text-answer types only. */
           out_your_text_answer: string | null;
           out_your_points: number;
           out_was_correct: boolean;

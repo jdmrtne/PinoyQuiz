@@ -22,6 +22,7 @@ import {
   getCurrentQuestion,
   submitAnswer,
   submitTextAnswer,
+  submitMatchingAnswer,
   endQuestion,
   getAnswerReveal,
   advanceToLeaderboard,
@@ -45,6 +46,7 @@ export default function GameRoom() {
   const [question, setQuestion] = useState<CurrentQuestion | null>(null);
   const [answeredIndex, setAnsweredIndex] = useState<number | null>(null);
   const [answeredText, setAnsweredText] = useState<string | null>(null);
+  const [answeredPairing, setAnsweredPairing] = useState<number[] | null>(null);
   const [reveal, setReveal] = useState<AnswerReveal | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [advancing, setAdvancing] = useState(false);
@@ -136,6 +138,7 @@ export default function GameRoom() {
   useEffect(() => {
     setAnsweredIndex(null);
     setAnsweredText(null);
+    setAnsweredPairing(null);
   }, [game?.current_question_id]);
 
   // Fetch the reveal payload whenever the game enters REVEAL state.
@@ -294,6 +297,23 @@ export default function GameRoom() {
     }
   }
 
+  async function handleAnswerPairing(pairing: number[]) {
+    if (!game) return;
+    const canChangeAnswer = game.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS";
+    if (!canChangeAnswer && answeredPairing !== null) return;
+    setActionError(null);
+    const previous = answeredPairing;
+    setAnsweredPairing(pairing); // optimistic — locks/updates the UI immediately
+    try {
+      await submitMatchingAnswer(game.id, pairing);
+    } catch (err) {
+      setAnsweredPairing(previous); // revert to whatever was actually locked in
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't submit your answer."
+      );
+    }
+  }
+
   async function handleRemove(playerId: string) {
     setActionError(null);
     try {
@@ -417,8 +437,10 @@ export default function GameRoom() {
           question={question}
           answeredIndex={answeredIndex}
           answeredText={answeredText}
+          answeredPairing={answeredPairing}
           onAnswer={handleAnswer}
           onAnswerText={handleAnswerText}
+          onAnswerPairing={handleAnswerPairing}
           canChangeAnswer={game.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS"}
           isAutomatic={isAutomatic}
         />

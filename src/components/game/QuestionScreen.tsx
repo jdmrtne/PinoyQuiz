@@ -10,21 +10,26 @@ export function QuestionScreen({
   question,
   answeredIndex,
   answeredText,
+  answeredPairing,
   onAnswer,
   onAnswerText,
+  onAnswerPairing,
   canChangeAnswer,
   isAutomatic,
 }: {
   question: CurrentQuestion;
   /** Displayed slot this player already picked (choice-based types), or null if not answered yet. */
   answeredIndex: number | null;
-  /** This player's already-submitted text (identification/fill_blank), or null if not answered yet. */
+  /** This player's already-submitted text (identification/fill_blank/unscramble/image), or null if not answered yet. */
   answeredText: string | null;
+  /** This player's already-submitted pairing (matching), or null if not answered yet. */
+  answeredPairing: number[] | null;
   onAnswer: (index: number) => void;
   onAnswerText: (text: string) => void;
+  onAnswerPairing: (pairing: number[]) => void;
   /** true when games.answer_behavior === "CHANGE_UNTIL_TIMER_ENDS" — an
-   * already-picked option (or already-typed answer) stays editable right
-   * up until the timer runs out, instead of locking on first submission. */
+   * already-picked/typed/matched answer stays editable right up until the
+   * timer runs out, instead of locking on first submission. */
   canChangeAnswer: boolean;
   /** true when games.game_mode === "AUTOMATIC" — only changes the footer
    * copy below ("waiting for the host" doesn't apply to an automatic game). */
@@ -36,8 +41,18 @@ export function QuestionScreen({
   );
   const timeUp = remaining <= 0;
   const isTextType =
-    question.questionType === "identification" || question.questionType === "fill_blank";
+    question.questionType === "identification" ||
+    question.questionType === "fill_blank" ||
+    question.questionType === "unscramble" ||
+    question.questionType === "image";
   const isTrueFalse = question.questionType === "true_false";
+  const isMatching = question.questionType === "matching";
+
+  const hasAnswered = isMatching
+    ? answeredPairing !== null
+    : isTextType
+      ? answeredText !== null
+      : answeredIndex !== null;
 
   return (
     <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
@@ -61,7 +76,30 @@ export function QuestionScreen({
           </h1>
         </Card>
 
-        {isTextType ? (
+        {question.questionType === "image" && question.imageUrl && (
+          <Card className="p-2 overflow-hidden">
+            <img
+              src={question.imageUrl}
+              alt="Identify this"
+              className="w-full max-h-72 object-cover rounded-xl"
+            />
+          </Card>
+        )}
+
+        {question.questionType === "unscramble" && question.scrambleLetters && (
+          <ScrambleTiles letters={question.scrambleLetters} />
+        )}
+
+        {isMatching ? (
+          <MatchingBoard
+            terms={question.matchTerms ?? []}
+            definitions={question.matchDefinitions ?? []}
+            answeredPairing={answeredPairing}
+            onSubmit={onAnswerPairing}
+            canChangeAnswer={canChangeAnswer}
+            timeUp={timeUp}
+          />
+        ) : isTextType ? (
           <TextAnswerForm
             answeredText={answeredText}
             onSubmit={onAnswerText}
@@ -70,7 +108,9 @@ export function QuestionScreen({
             placeholder={
               question.questionType === "fill_blank"
                 ? "Type the missing word or phrase…"
-                : "Type your answer…"
+                : question.questionType === "unscramble"
+                  ? "Type the unscrambled word…"
+                  : "Type your answer…"
             }
           />
         ) : (
@@ -85,12 +125,7 @@ export function QuestionScreen({
         )}
 
         <p className="text-xs text-center text-sampaguita/30">
-          {footerCopy({
-            hasAnswered: isTextType ? answeredText !== null : answeredIndex !== null,
-            canChangeAnswer,
-            timeUp,
-            isAutomatic,
-          })}
+          {footerCopy({ hasAnswered, canChangeAnswer, timeUp, isAutomatic })}
         </p>
       </div>
     </div>
@@ -248,5 +283,161 @@ function TextAnswerForm({
         {hasAnswered ? (canChangeAnswer ? "Update answer" : "Submitted") : "Submit answer"}
       </Button>
     </form>
+  );
+}
+
+/**
+ * Purely decorative letter tiles — unscramble is graded through the same
+ * typed-text submission as identification/fill_blank (TextAnswerForm,
+ * rendered right below this by the parent), so these tiles don't carry
+ * any answer state themselves. They exist to make "unscramble" visually
+ * distinct from "type the answer to this question" per the brief ("add a
+ * visual interaction that makes this feel different from normal
+ * identification").
+ */
+function ScrambleTiles({ letters }: { letters: string[] }) {
+  return (
+    <div className="flex flex-wrap justify-center gap-2" aria-hidden="true">
+      {letters.map((ch, i) => (
+        <span
+          key={i}
+          className="flex items-center justify-center w-11 h-11 rounded-xl bg-ube text-sampaguita font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)]"
+        >
+          {ch}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Tap a term, then tap a definition to pair them; tap either half of an
+ * existing pair to undo it. Submits automatically once every term has a
+ * definition — matching doesn't have a natural "one tap = one answer"
+ * moment like the other types, so auto-submit-on-complete is the least
+ * surprising behavior (mirrors the brief's "make this interactive rather
+ * than simply asking another multiple-choice question").
+ */
+function MatchingBoard({
+  terms,
+  definitions,
+  answeredPairing,
+  onSubmit,
+  canChangeAnswer,
+  timeUp,
+}: {
+  terms: string[];
+  definitions: string[];
+  answeredPairing: number[] | null;
+  onSubmit: (pairing: number[]) => void;
+  canChangeAnswer: boolean;
+  timeUp: boolean;
+}) {
+  const hasAnswered = answeredPairing !== null;
+  const locked = (hasAnswered && !canChangeAnswer) || timeUp;
+
+  // pairing[i] = displayed definition slot assigned to terms[i], or -1 if unpaired.
+  const [pairing, setPairing] = useState<number[]>(
+    () => answeredPairing ?? terms.map(() => -1)
+  );
+  const [selectedTerm, setSelectedTerm] = useState<number | null>(null);
+
+  useEffect(() => {
+    setPairing(answeredPairing ?? terms.map(() => -1));
+    setSelectedTerm(null);
+    // terms.length is stable per-question; re-keying on the question
+    // itself happens via the parent unmounting/remounting on question change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answeredPairing]);
+
+  const usedDefSlots = new Set(pairing.filter((d) => d >= 0));
+
+  function pickTerm(termIndex: number) {
+    if (locked) return;
+    setSelectedTerm((cur) => (cur === termIndex ? null : termIndex));
+  }
+
+  function pickDefinition(defSlot: number) {
+    if (locked || selectedTerm === null) return;
+    const next = [...pairing];
+    // Unpair anything already using this definition slot.
+    for (let i = 0; i < next.length; i++) {
+      if (next[i] === defSlot) next[i] = -1;
+    }
+    next[selectedTerm] = defSlot;
+    setPairing(next);
+    setSelectedTerm(null);
+    if (next.every((d) => d >= 0)) {
+      onSubmit(next);
+    }
+  }
+
+  function unpair(termIndex: number) {
+    if (locked) return;
+    const next = [...pairing];
+    next[termIndex] = -1;
+    setPairing(next);
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-2">
+          {terms.map((term, i) => {
+            const paired = pairing[i] >= 0;
+            const isSelected = selectedTerm === i;
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={locked}
+                onClick={() => (paired ? unpair(i) : pickTerm(i))}
+                className={`rounded-xl border-2 px-3 py-3 text-sm font-semibold text-left transition-colors ${
+                  isSelected
+                    ? "border-mango bg-mango/10 text-sampaguita"
+                    : paired
+                      ? "border-bagoong bg-bagoong/10 text-sampaguita"
+                      : "border-ink-3 bg-ink-2 text-sampaguita/90"
+                } ${locked ? "opacity-70 cursor-default" : "cursor-pointer hover:border-mango/60"}`}
+              >
+                {term}
+                {paired && (
+                  <span className="block text-xs text-bagoong mt-0.5">
+                    → {definitions[pairing[i]]}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-col gap-2">
+          {definitions.map((def, i) => {
+            const used = usedDefSlots.has(i);
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={locked || used}
+                onClick={() => pickDefinition(i)}
+                className={`rounded-xl border-2 px-3 py-3 text-sm font-semibold text-left transition-colors ${
+                  used
+                    ? "border-ink-3 bg-ink text-sampaguita/30"
+                    : selectedTerm !== null
+                      ? "border-mango/60 bg-ink-2 text-sampaguita/90 cursor-pointer hover:border-mango"
+                      : "border-ink-3 bg-ink-2 text-sampaguita/60"
+                }`}
+              >
+                {def}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <p className="text-xs text-center text-sampaguita/40">
+        {selectedTerm !== null
+          ? "Now tap the matching definition on the right."
+          : "Tap a term, then tap its definition."}
+      </p>
+    </div>
   );
 }

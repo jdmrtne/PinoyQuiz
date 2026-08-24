@@ -26,13 +26,18 @@ export type Difficulty = "easy" | "medium" | "hard" | "mixed";
 /**
  * Added Phase 1 of the question-types work (0026_question_types_phase1.sql).
  * More values (unscramble, matching, image, sequence, scenario) arrive in
- * later phases — see docs/MASTER_HANDOFF.md's Phase 12 addendum.
+ * later phases of the question-types work (tracked separately from the
+ * numbered Phase 1-15 roadmap in docs/MASTER_HANDOFF.md — see that doc's
+ * "Question types" section once added, or the 0026/0028 migration headers).
  */
 export type QuestionType =
   | "multiple_choice"
   | "true_false"
   | "identification"
-  | "fill_blank";
+  | "fill_blank"
+  | "unscramble"
+  | "matching"
+  | "image";
 
 /** Added alongside 0015_automatic_mode_and_answer_behavior.sql. */
 export type GameMode = "HOST_CONTROLLED" | "AUTOMATIC";
@@ -83,6 +88,14 @@ export interface ClientQuestion {
   prompt: string;
   /** Populated left-to-right; entries past this type's real option count are null (see CurrentQuestion in gameApi.ts). */
   options: [string | null, string | null, string | null, string | null];
+  /** image type only. */
+  imageUrl: string | null;
+  /** unscramble only — per-game shuffled letters. */
+  scrambleLetters: string[] | null;
+  /** matching only. */
+  matchTerms: string[] | null;
+  /** matching only, in shuffled displayed order. */
+  matchDefinitions: string[] | null;
   order: number;
   totalQuestions: number;
 }
@@ -90,11 +103,18 @@ export interface ClientQuestion {
 export interface AnswerReveal {
   questionId: string;
   questionType: QuestionType;
-  /** Choice-based types (multiple_choice/true_false) only — null for identification/fill_blank. */
+  /** Choice-based types (multiple_choice/true_false) only — null for other types. */
   correctOptionIndex: number | null;
   correctOptionText: string | null;
-  /** Text-answer types (identification/fill_blank) only — the canonical accepted answer. */
+  /** Text-answer types (identification/fill_blank/unscramble/image) only — the canonical accepted answer. */
   correctAnswer: string | null;
+  /** image type only. */
+  imageUrl: string | null;
+  /** matching only, canonical (unshuffled) order. */
+  matchTerms: string[] | null;
+  matchDefinitions: string[] | null;
+  /** matching only — this player's submitted pairing. */
+  yourPairing: number[] | null;
   explanation?: string;
   yourAnswerIndex: number | null;
   /** This player's typed submission — text-answer types only. */

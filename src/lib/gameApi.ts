@@ -53,6 +53,9 @@ export function friendlyMessage(raw: string): string {
     // Added 0026_question_types_phase1.sql
     "This question needs a typed answer",
     "This question needs an option, not typed text",
+    // Added 0028_question_types_phase2.sql
+    "This question needs a different kind of answer",
+    "You need to match every term before submitting",
   ];
   const match = known.find((m) => raw.includes(m));
   return match ? raw : "Something went wrong. Please try again.";
@@ -181,6 +184,14 @@ export interface CurrentQuestion {
    * no options grid, just a text input.
    */
   options: [string | null, string | null, string | null, string | null];
+  /** image type only. */
+  imageUrl: string | null;
+  /** unscramble only — per-game shuffled letters. */
+  scrambleLetters: string[] | null;
+  /** matching only. */
+  matchTerms: string[] | null;
+  /** matching only, in shuffled displayed order. */
+  matchDefinitions: string[] | null;
   order: number;
   total: number;
   timeLimitSeconds: number;
@@ -203,6 +214,10 @@ export async function getCurrentQuestion(
     questionType: row.out_question_type,
     prompt: row.out_prompt,
     options: [row.out_option_1, row.out_option_2, row.out_option_3, row.out_option_4],
+    imageUrl: row.out_image_url,
+    scrambleLetters: row.out_scramble_letters,
+    matchTerms: row.out_match_terms,
+    matchDefinitions: row.out_match_definitions,
     order: row.out_order,
     total: row.out_total,
     timeLimitSeconds: row.out_time_limit_seconds,
@@ -248,6 +263,23 @@ export async function submitTextAnswer(
   return { isCorrect: row.out_is_correct, points: row.out_points };
 }
 
+/**
+ * matching counterpart to submitAnswer. pairing[i] is the *displayed*
+ * definition slot the player assigned to matchTerms[i] (matching
+ * CurrentQuestion.matchTerms/matchDefinitions order) — grading happens
+ * server-side in submit_matching_answer.
+ */
+export async function submitMatchingAnswer(
+  gameId: string,
+  pairing: number[]
+): Promise<SubmitAnswerResult> {
+  const row = await callRpc("submit_matching_answer", {
+    p_game_id: gameId,
+    p_pairing: pairing,
+  });
+  return { isCorrect: row.out_is_correct, points: row.out_points };
+}
+
 /** Host-only. Flips QUESTION -> REVEAL, filling in "no answer" rows for anyone who didn't submit in time. */
 export async function endQuestion(gameId: string): Promise<void> {
   await callRpc("end_question", { p_game_id: gameId });
@@ -278,6 +310,10 @@ export async function getAnswerReveal(
     correctOptionIndex: row.out_correct_option,
     correctOptionText: row.out_correct_text,
     correctAnswer: row.out_correct_answer,
+    imageUrl: row.out_image_url,
+    matchTerms: row.out_match_terms,
+    matchDefinitions: row.out_match_definitions,
+    yourPairing: row.out_your_pairing,
     explanation: row.out_explanation ?? undefined,
     yourAnswerIndex: row.out_your_answer,
     yourTextAnswer: row.out_your_text_answer,

@@ -286,9 +286,10 @@ export default function CreateGame() {
                   <span className="text-mango">(Beta)</span>
                 </span>
                 <span className="text-xs text-sampaguita/50">
-                  Mixes in True/False, Identification, and Fill-in-the-Blank
-                  questions alongside Multiple Choice. Off by default —
-                  Classic games stay Multiple Choice only.
+                  Mixes in True/False, Identification, Fill-in-the-Blank,
+                  Unscramble, Matching, and Image ID questions alongside
+                  Multiple Choice. Off by default — Classic games stay
+                  Multiple Choice only.
                 </span>
               </span>
             </label>

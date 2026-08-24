@@ -628,3 +628,68 @@ produces no CSS.
   place in the sequence, at explicit request. Phase 14 (production
   deployment) is once again the immediate next task — don't skip ahead
   to some other later phase without a similarly explicit reason.
+
+## Question types (separate track from the Phase 1-15 roadmap above)
+
+Started by explicit request, not part of the original spec the numbered
+phases above were built against — tracked with its own "Question-Types
+Phase N" numbering so it doesn't collide with the real Phase 1-15
+history. Migrations: `0026_question_types_phase1.sql`,
+`0027_question_types_phase2_enum.sql`, `0028_question_types_phase2.sql`.
+Seeds: `supabase/seed/0002_phase1_question_types_sample.sql`,
+`supabase/seed/0003_phase2_question_types_sample.sql`.
+
+**Question-Types Phase 1 — done.** True/False, Identification,
+Fill-in-the-Blank alongside the original Multiple Choice. `questions`
+gained `question_type` (defaults `multiple_choice` — every pre-existing
+row needed zero changes), `correct_answer`, `acceptable_answers`.
+`option_a-d`/`correct_option` went nullable (still required for
+multiple_choice/true_false via check constraints, not a NOT NULL). New
+`submit_text_answer` RPC grades identification/fill_blank by normalized
+(trim, collapse whitespace, case-fold) string comparison against
+`correct_answer` or any of `acceptable_answers`. `games` gained
+`include_new_question_types` (default `false`) — a host opts in via a
+checkbox on Create Game; nothing about an existing/未-updated caller
+changes by default.
+
+**Question-Types Phase 2 — done.** Unscramble, Matching, Image ID.
+Unscramble and Image both grade through the *same* `submit_text_answer`
+from Phase 1 (Image is really "Identification with a picture"; Unscramble
+is "type the word" with a per-game shuffled-letters display) — no new
+grading function needed for either. `questions` gained `image_url` and
+the aligned-by-index pair `match_terms`/`match_definitions`.
+`game_questions` gained `unscramble_letters` (generated once at
+`start_game`, stable for the question's duration — same idea as
+`shuffle_map`) and `match_shuffle` (same convention as `shuffle_map`,
+applied to `match_definitions`). New `submit_matching_answer` RPC grades
+all-or-nothing (every term paired to its correct definition) — per-pair
+partial credit would be a reasonable later extension but wasn't added
+now per the brief's "don't add fields/behavior that isn't needed yet."
+
+**Not done yet, in priority order per the original brief:** Sequence/
+Arrange, Timed Challenge (a real per-question configurable timer + speed
+bonus UI — note base speed bonus scoring already exists from the
+original engine), real Mixed/Random mode (today's
+`include_new_question_types` is a blunt on/off, not per-question-type
+selection or weighting), Streaks, Difficulty-driven config, the
+remaining named game modes (Speed Challenge/Brain Challenge/Survival/
+Daily Challenge), and an admin/question-authoring UI (every question
+above was seeded via SQL — there is still no in-app way to create one).
+
+**Rules for continuing this track**, same spirit as the "Don't relitigate
+past decisions" section above:
+- Redefine functions from their *latest* version, not whatever an older
+  migration file shows — trace forward from 0028, the same way 0028 was
+  built by tracing 0022/0016 forward rather than 0010/0011's originals.
+  Regressing custom-category-mix, Play Again/no-repeat-questions, or rate
+  limiting while adding a question type is the most likely way to
+  quietly break something that already worked.
+- New question_type enum values need their own migration/transaction
+  before anything can use them (`0027` exists solely for this reason) —
+  Postgres rejects referencing a new enum value in the same transaction
+  that added it.
+- Keep the "existing multiple_choice behavior is the zero-config default"
+  property intact: any new selection/scoring/mode logic should require an
+  explicit opt-in (a new column defaulting to the old behavior, a new
+  checkbox defaulting off) rather than changing what a caller who does
+  nothing differently gets.
