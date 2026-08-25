@@ -140,6 +140,14 @@ end $$;
 -- Scenario 3: requesting more questions than exist for a narrow
 -- category/difficulty combination is rejected with a friendly error
 -- instead of silently starting a shorter game.
+--
+-- NOTE: this scenario originally targeted 'history'/'hard' on the
+-- assumption the seed only had 2 such rows. 0025_hard_question_expansion
+-- (added after this scenario was written) brought that up to 11, making
+-- the assertion stale independent of anything in 0034/0035 — confirmed
+-- by reproducing the same failure against 0001-0033 alone before any of
+-- this phase's changes. Retargeted at 'history'/'easy', which the
+-- current seed genuinely only has 1 row for.
 -- ---------------------------------------------------------------------
 do $$
 declare
@@ -150,9 +158,9 @@ declare
 begin
   insert into auth.users default values returning id into v_uid;
   perform set_config('request.jwt.claim.sub', v_uid::text, false);
-  -- Seed only has 2 'history'/'hard' questions; ask for 5.
+  -- Seed only has 1 'history'/'easy' question; ask for 5.
   select out_game_id, out_room_code into v_game_id, v_room_code
-    from create_game('history', 'hard', 5::smallint, 20::smallint, 'GreedyNick');
+    from create_game('history', 'easy', 5::smallint, 20::smallint, 'GreedyNick');
 
   begin
     perform start_game(v_game_id);
@@ -684,13 +692,25 @@ end $$;
 -- across rounds of the same room, and only falls back to repeats once
 -- that pool is actually exhausted — never errors either way.
 --
--- Uses the seed's trivia/easy pool with question_count set to exactly
--- half the pool's current size (computed dynamically, not hardcoded —
--- Phase 15 grew this pool from 4 to 6, and it may grow again later):
+-- Uses the seed's history/medium pool with question_count set to
+-- exactly half the pool's current size (computed dynamically, not
+-- hardcoded):
 --   round 1: draws half the pool (half remain fresh)
 --   round 2: exactly the other half remain fresh — must be disjoint
 --            from round 1
 --   round 3: 0 fresh remain — forced to repeat, but must not error
+--
+-- NOTE: originally targeted trivia/easy, on the assumption (stated in
+-- the comment at the time) that pool was >=4 and evenly divisible. It
+-- has since shrunk to 2 rows — stale independent of 0034/0035 (confirmed
+-- by reproducing the same assertion failure against 0001-0033 alone).
+-- Retargeted at history/medium (4 rows, round_count=2): deliberately a
+-- *small* even pool, not just any evenly-divisible one — this scenario
+-- calls advance_question/end_question/advance_to_leaderboard (each
+-- rate-limited to 10 calls / 10 seconds) once per question per round,
+-- back-to-back with no real delay, so a pool that makes round_count too
+-- large (e.g. the entertainment/hard pool's 12 rows, round_count=6) trips
+-- that rate limit across rounds 1+2 before round 3 even starts.
 -- ---------------------------------------------------------------------
 do $$
 declare
@@ -703,14 +723,14 @@ declare
   v_pool_size int;
   v_round_count smallint;
 begin
-  select count(*) into v_pool_size from questions where category = 'trivia' and difficulty = 'easy';
-  perform test_assert(v_pool_size >= 4 and v_pool_size % 2 = 0, 'scenario15: setup — the trivia/easy pool is a non-trivial, evenly-divisible size (test assumption)');
+  select count(*) into v_pool_size from questions where category = 'history' and difficulty = 'medium';
+  perform test_assert(v_pool_size >= 4 and v_pool_size % 2 = 0, 'scenario15: setup — the history/medium pool is a non-trivial, evenly-divisible size (test assumption)');
   v_round_count := (v_pool_size / 2)::smallint;
 
   insert into auth.users default values returning id into v_uid;
   perform set_config('request.jwt.claim.sub', v_uid::text, false);
   select out_game_id, out_room_code into v_game_id, v_room_code
-    from create_game('trivia', 'easy', v_round_count, 30::smallint, 'RepeatHost');
+    from create_game('history', 'medium', v_round_count, 30::smallint, 'RepeatHost');
 
   -- Round 1.
   perform start_game(v_game_id);
@@ -877,6 +897,101 @@ begin
   perform test_assert((select status from games where id = v_game_id) = 'FINISHED', 'scenario17: LEADERBOARD advances once its 2s duration elapses');
 end $$;
 
+-- ---------------------------------------------------------------------
+-- Scenario 18: the question-adaptation layer (0034/0035) — native
+-- priority, cross-type source dedup, category/difficulty inheritance.
+--
+-- Self-contained: inserts its own tiny synthetic multiple_choice
+-- sources plus a couple of hand-built adapted rows (rather than
+-- depending on 0035's CSV-derived data, which only exists once the
+-- real question bank has been imported and is not part of this
+-- migration sequence) so this scenario runs the same way in any fresh
+-- dev/CI database as every other scenario in this file.
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_uid uuid;
+  v_game_id uuid;
+  v_src1 uuid;
+  v_src2 uuid;
+  v_src3 uuid;
+  v_native_tf uuid;
+  v_count int;
+  v_native_used boolean;
+  v_dupes int;
+  v_bad_category_or_difficulty int;
+begin
+  insert into auth.users default values returning id into v_uid;
+  perform set_config('request.jwt.claim.sub', v_uid::text, false);
+
+  -- Three synthetic multiple_choice sources in a category/difficulty
+  -- combo this file doesn't otherwise touch.
+  insert into questions (category, difficulty, question_type, prompt, option_a, option_b, option_c, option_d, correct_option, explanation)
+  values ('mythology_folklore', 'medium', 'multiple_choice', 'Scenario18 test prompt A?', 'Answer', 'Wrong1', 'Wrong2', 'Wrong3', 'A', null)
+  returning id into v_src1;
+  insert into questions (category, difficulty, question_type, prompt, option_a, option_b, option_c, option_d, correct_option, explanation)
+  values ('mythology_folklore', 'medium', 'multiple_choice', 'Scenario18 test prompt B?', 'Answer', 'Wrong1', 'Wrong2', 'Wrong3', 'A', null)
+  returning id into v_src2;
+  insert into questions (category, difficulty, question_type, prompt, option_a, option_b, option_c, option_d, correct_option, explanation)
+  values ('mythology_folklore', 'medium', 'multiple_choice', 'Scenario18 test prompt C?', 'Answer', 'Wrong1', 'Wrong2', 'Wrong3', 'A', null)
+  returning id into v_src3;
+
+  -- One NATIVE true_false row (unrelated source) so priority-of-source
+  -- has something native to prefer over the adapted ones below.
+  insert into questions (category, difficulty, question_type, prompt, option_a, option_b, correct_option, explanation)
+  values ('mythology_folklore', 'medium', 'true_false', 'Scenario18 native true_false statement.', 'True', 'False', 'A', null)
+  returning id into v_native_tf;
+
+  -- Adapted representations of v_src1/v_src2/v_src3: identification for
+  -- all three, plus an adapted true_false for v_src1 specifically (so
+  -- v_src1 has *two* compatible representations — identification and
+  -- true_false — and picking one must block the other).
+  insert into questions (category, difficulty, question_type, prompt, correct_answer, source_question_id, is_adapted)
+  values
+    ('mythology_folklore', 'medium', 'identification', 'Scenario18 test prompt A?', 'Answer', v_src1, true),
+    ('mythology_folklore', 'medium', 'identification', 'Scenario18 test prompt B?', 'Answer', v_src2, true),
+    ('mythology_folklore', 'medium', 'identification', 'Scenario18 test prompt C?', 'Answer', v_src3, true);
+  insert into questions (category, difficulty, question_type, prompt, option_a, option_b, correct_option, source_question_id, is_adapted)
+  values ('mythology_folklore', 'medium', 'true_false', 'Answer is the answer to test prompt A.', 'True', 'False', 'A', v_src1, true);
+
+  select out_game_id into v_game_id
+  from create_game(
+    p_category => 'mythology_folklore',
+    p_difficulty => 'medium',
+    p_question_count => 4::smallint,
+    p_enabled_question_types => array['identification','true_false']::question_type[]
+  );
+
+  perform start_game(v_game_id);
+
+  select count(*) into v_count from game_questions where game_id = v_game_id;
+  perform test_assert(v_count = 4, 'scenario18: fulfilled the full requested question_count by combining native + adapted rows');
+
+  -- Native true_false must have been picked over nothing (it's the only
+  -- native true_false available, and with 4 slots split across 2 types
+  -- there's exactly 2 true_false slots to fill — it must win one).
+  select exists(
+    select 1 from game_questions where game_id = v_game_id and question_id = v_native_tf
+  ) into v_native_used;
+  perform test_assert(v_native_used, 'scenario18: the native true_false row was preferred and selected over adapted ones');
+
+  -- Cross-type source dedup: v_src1 has both an identification and a
+  -- true_false representation — at most one of the two may appear.
+  select count(*) into v_dupes
+  from game_questions gq
+  join questions q on q.id = gq.question_id
+  where gq.game_id = v_game_id and q.consumed_source_ids && array[v_src1];
+  perform test_assert(v_dupes <= 1, 'scenario18: v_src1''s identification and true_false representations never both appear in the same game');
+
+  -- Category/difficulty inheritance: every selected row (native or
+  -- adapted) must be exactly mythology_folklore/medium.
+  select count(*) into v_bad_category_or_difficulty
+  from game_questions gq
+  join questions q on q.id = gq.question_id
+  where gq.game_id = v_game_id and (q.category <> 'mythology_folklore' or q.difficulty <> 'medium');
+  perform test_assert(v_bad_category_or_difficulty = 0, 'scenario18: every selected row (native and adapted) inherited the requested category and difficulty');
+end $$;
+
 drop function test_assert(boolean, text);
 
-\echo '=== All Phase 11 + Automatic Mode & Answer Behavior + Play Again + Faster Timing scenarios passed ==='
+\echo '=== All Phase 11 + Automatic Mode & Answer Behavior + Play Again + Faster Timing + Question Adaptation scenarios passed ==='

@@ -186,8 +186,6 @@ export interface Database {
           sequence_items: string[] | null;
           /** Added 0030 — per-question timer override in seconds, any type. Null means "use this game's time_limit_seconds". */
           time_limit_override: number | null;
-          /** Added 0034 — adapted question points to the original MC source; null for native questions. */
-          source_question_id: string | null;
           explanation: string | null;
           created_at: string;
         };
