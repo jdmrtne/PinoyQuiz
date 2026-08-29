@@ -1,0 +1,10 @@
+{
+  "csv_rows": 1836,
+  "eligible_mc_sources": 1810,
+  "true_false_generated": 3382,
+  "identification_generated": 1714,
+  "fill_blank_generated": 621,
+  "unscramble_generated": 601,
+  "matching_sets_generated": 145,
+  "matching_sources_used": 497
+}
