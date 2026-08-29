@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
-import { QuestionImage } from "./QuestionImage";
 import { useServerTimer } from "../../hooks/useServerTimer";
 import type { CurrentQuestion } from "../../lib/gameApi";
 
@@ -140,6 +139,37 @@ export function QuestionScreen({
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * Renders the prompt image for "image" type questions. Falls back to a
+ * plain message instead of a broken-image icon if the URL 404s / times
+ * out — hotlinked source images (e.g. Wikimedia thumbnails) occasionally
+ * get renamed or removed upstream, and we don't want that to block the
+ * player from at least reading the question and guessing.
+ */
+function QuestionImage({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <Card className="p-6 text-center text-sm text-sampaguita/50">
+        Couldn't load the image for this question — go ahead and answer
+        based on the prompt above.
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-2 overflow-hidden">
+      <img
+        src={src}
+        alt="Identify this"
+        className="w-full max-h-72 object-cover rounded-xl"
+        onError={() => setFailed(true)}
+      />
+    </Card>
   );
 }
 
