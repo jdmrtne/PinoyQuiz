@@ -178,10 +178,10 @@ function ChoiceReveal({
               <span
                 className={`flex items-center justify-center w-8 h-8 rounded-full font-display font-bold flex-shrink-0 ${
                   isCorrect
-                    ? "bg-bagoong text-ink"
+                    ? "bg-bagoong text-night"
                     : isYours
-                      ? "bg-sunset text-ink"
-                      : "bg-ink text-mango"
+                      ? "bg-sunset text-night"
+                      : "bg-night text-mango"
                 }`}
               >
                 {OPTION_LETTERS[i]}
@@ -301,7 +301,7 @@ function SequenceReveal({ reveal }: { reveal: AnswerReveal }) {
               : "border-ink-3 bg-ink-2 text-sampaguita/80"
           }`}
         >
-          <span className="flex items-center justify-center w-7 h-7 rounded-full bg-bagoong text-ink font-display font-bold flex-shrink-0">
+          <span className="flex items-center justify-center w-7 h-7 rounded-full bg-bagoong text-night font-display font-bold flex-shrink-0">
             {i + 1}
           </span>
           {item}

@@ -433,7 +433,7 @@ export default function CreateGame() {
                     >
                       <span
                         className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${
-                          active ? "bg-mango text-ink" : "bg-ink-3 text-sampaguita/70"
+                          active ? "bg-mango text-night" : "bg-ink-3 text-sampaguita/70"
                         }`}
                       >
                         {strategy === "smart" ? (

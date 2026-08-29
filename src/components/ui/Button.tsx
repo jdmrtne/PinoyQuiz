@@ -12,13 +12,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses: Record<Variant, string> = {
   primary:
-    "bg-mango text-ink hover:bg-mango-dim active:scale-[0.98] shadow-[0_6px_0_0_var(--color-mango-dim)] hover:shadow-[0_4px_0_0_var(--color-mango-dim)] active:shadow-[0_2px_0_0_var(--color-mango-dim)] active:translate-y-1",
+    "bg-mango text-night hover:bg-mango-dim active:scale-[0.98] shadow-[0_6px_0_0_var(--color-mango-dim)] hover:shadow-[0_4px_0_0_var(--color-mango-dim)] active:shadow-[0_2px_0_0_var(--color-mango-dim)] active:translate-y-1",
   secondary:
-    "bg-ube text-sampaguita hover:bg-ube-dim active:scale-[0.98] shadow-[0_6px_0_0_var(--color-ube-dim)] hover:shadow-[0_4px_0_0_var(--color-ube-dim)] active:shadow-[0_2px_0_0_var(--color-ube-dim)] active:translate-y-1",
+    "bg-ube text-cloud hover:bg-ube-dim active:scale-[0.98] shadow-[0_6px_0_0_var(--color-ube-dim)] hover:shadow-[0_4px_0_0_var(--color-ube-dim)] active:shadow-[0_2px_0_0_var(--color-ube-dim)] active:translate-y-1",
   ghost:
     "bg-ink-2 text-sampaguita border-2 border-ink-3 hover:border-mango/60",
   danger:
-    "bg-sunset/90 text-ink hover:bg-sunset active:scale-[0.98]",
+    "bg-sunset/90 text-night hover:bg-sunset active:scale-[0.98]",
 };
 
 const sizeClasses: Record<Size, string> = {

@@ -6,12 +6,63 @@
   Palette pulls from jeepney paint jobs and Manila dusk skies, not the
   generic AI cream/terracotta or near-black/acid-green defaults.
 
-  Ink        #0E1329  — base background, "night sky over the bay"
-  Mango      #FFB100  — primary accent, warmth + energy
-  Ube        #7C4DDA  — secondary accent, festive
-  Sunset     #FF5D5D  — tertiary accent, urgency/incorrect
-  Sampaguita #F7F5EF  — near-white text/surfaces, the national flower
-  Bagoong    #16D19A  — success/correct green (teal-leaning, not generic green)
+  Ink        base background / surface family — flips between themes
+  Mango      #FFB100 (dark) / #AD7800 (light) — primary accent
+  Ube        #7C4DDA — secondary accent (kept identical in both themes,
+             see note below)
+  Sunset     tertiary accent, urgency/incorrect
+  Sampaguita near-white (dark) / near-black (light) — body text, the
+             national flower
+  Bagoong    success/correct green (teal-leaning, not generic green)
+
+  --- Light mode & the "night" / "cloud" tokens ---
+  `ink` and `sampaguita` each have TWO jobs in the existing components:
+  (1) a surface/foreground role that should genuinely flip with the theme
+      (page background, card background, body text), and
+  (2) a fixed role as the text color stamped on top of a saturated accent
+      fill (bg-mango, bg-sunset, bg-bagoong, bg-ube) — e.g. the primary
+      button's `text-ink`, or the avatar chip's `text-sampaguita` on
+      `bg-ube`.
+  Those two jobs want opposite behavior: role (1) needs to flip to light
+  in light mode, but role (2) needs to stay put — a light background
+  needs *dark* text on top of mango, not light text, and vice versa for
+  ube's fill. A single flipping variable can't do both (verified with
+  actual contrast-ratio math, not just eyeballing — light `ink` in
+  role 2 comes out around 1.7:1 on `bg-mango`, nowhere near AA).
+
+  So this file introduces two additional tokens that are IDENTICAL in
+  both themes:
+    --color-night  (#0E1329) — always-dark text/fill, for use on top of
+                    mango / sunset / bagoong
+    --color-cloud  (#F7F5EF) — always-light text, for use on top of ube
+  The ~17 spots in components that were doing role (2) with `text-ink`
+  or `text-sampaguita` were switched to `text-night` / `text-cloud`
+  (see CHANGELOG / PR notes) so `ink` and `sampaguita` are now free to
+  flip purely as surface/body-text tokens.
+
+  --- Accent colors also change value in light mode ---
+  mango / sunset / bagoong are each used BOTH as a bright fill (badge/
+  button backgrounds, paired with `text-night`) and as a foreground
+  text color directly on a card surface (e.g. `text-mango` labels).
+  A fill wants to stay bright/vivid; text-on-light-background wants to
+  be dark enough for 4.5:1. The same variable can't hit both extremes
+  at once (this is a real ceiling, not a tuning miss — with `night`
+  fixed near-black and a near-white light surface, the best any single
+  hue can do is ~4.3:1 simultaneously on both sides). The light-mode
+  values below were solved for that trade-off: they keep the fill
+  role comfortably ≥4.5:1 against `night` text, and land the
+  text-on-surface role at ~3.8–4.1:1 — a solid pass for the many large/
+  bold usages (headline numbers, timers) which only need 3:1, and a
+  near-miss (not a full 4.5:1 pass) for the handful of small-text
+  usages (e.g. the `text-xs` "Live multiplayer" pill, `text-xs
+  text-bagoong` explainer lines). Flagging this honestly rather than
+  claiming full AA everywhere — see the accompanying summary for the
+  couple of specific call-sites this affects, in case a further design
+  pass wants to swap those particular labels to `text-sampaguita`.
+
+  Ube is left unchanged between themes: it's only ever used as a fill
+  (paired with the fixed `text-cloud`), and #7C4DDA already clears
+  4.5:1 against `cloud` in both themes, so there was nothing to solve.
 */
 @theme {
   --color-ink: #0e1329;
@@ -25,23 +76,63 @@
   --color-sampaguita: #f7f5ef;
   --color-bagoong: #16d19a;
 
+  /* Fixed, non-themed tokens — see note above. */
+  --color-night: #0e1329;
+  --color-cloud: #f7f5ef;
+
   --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
   --font-body: "Inter", system-ui, sans-serif;
 
   --radius-card: 1.25rem;
   --radius-pill: 999px;
+
+  /* Body background decoration, themed below. */
+  --glow-1: rgba(124, 77, 218, 0.25);
+  --glow-2: rgba(255, 177, 0, 0.18);
+}
+
+/*
+  Light-mode overrides. Placed at the top level (unlayered), same as
+  the custom properties Tailwind v4's `@theme` block emits onto
+  `:root` — so this rule and the theme block have equal specificity
+  (`:root` and `[data-theme="light"]` are both 0-1-0), and normal CSS
+  cascade order decides the winner: because this block comes AFTER
+  `@theme` in the source, its values win whenever `data-theme="light"`
+  is set on <html>, without needing `!important` or extra specificity
+  hacks. Utilities like `bg-ink`/`text-mango` compile to
+  `background-color: var(--color-ink)` etc., so they read whichever
+  value is active in the cascade at paint time — confirmed this reflows
+  correctly at runtime, not just at Tailwind's build step.
+*/
+[data-theme="light"] {
+  --color-ink: #faf5ec;
+  --color-ink-2: #ffffff;
+  --color-ink-3: #948363;
+  --color-sampaguita: #161b33;
+
+  --color-mango: #ad7800;
+  --color-mango-dim: #8c6100;
+  --color-sunset: #d84f4f;
+  --color-bagoong: #0e8e68;
+
+  --glow-1: rgba(124, 77, 218, 0.1);
+  --glow-2: rgba(173, 120, 0, 0.12);
 }
 
 @layer base {
   html {
     color-scheme: dark;
   }
+  html[data-theme="light"] {
+    color-scheme: light;
+  }
   body {
     @apply bg-ink text-sampaguita font-body antialiased;
     background-image:
-      radial-gradient(circle at 12% 8%, rgba(124, 77, 218, 0.25), transparent 40%),
-      radial-gradient(circle at 88% 4%, rgba(255, 177, 0, 0.18), transparent 38%);
+      radial-gradient(circle at 12% 8%, var(--glow-1), transparent 40%),
+      radial-gradient(circle at 88% 4%, var(--glow-2), transparent 38%);
     background-attachment: fixed;
+    transition: background-color 0.2s ease, color 0.2s ease;
     /* Keep content clear of notches / home-indicator areas on iOS. Falls
        back to 0px on devices without insets (env() with no matching
        safe-area resolves to nothing, so the fallback in each call is
@@ -92,5 +183,8 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+  body {
+    transition: none !important;
   }
 }

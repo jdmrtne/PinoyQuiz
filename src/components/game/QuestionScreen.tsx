@@ -231,7 +231,7 @@ function ChoiceGrid({
             {useLetters && (
               <span
                 className={`flex items-center justify-center w-8 h-8 rounded-full font-display font-bold flex-shrink-0 ${
-                  isPicked ? "bg-mango text-ink" : "bg-ink text-mango"
+                  isPicked ? "bg-mango text-night" : "bg-night text-mango"
                 }`}
               >
                 {OPTION_LETTERS[i]}
@@ -317,7 +317,7 @@ function ScrambleTiles({ letters }: { letters: string[] }) {
       {letters.map((ch, i) => (
         <span
           key={i}
-          className="flex items-center justify-center w-11 h-11 rounded-xl bg-ube text-sampaguita font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)]"
+          className="flex items-center justify-center w-11 h-11 rounded-xl bg-ube text-cloud font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)]"
         >
           {ch}
         </span>
@@ -517,7 +517,7 @@ function SequenceBoard({
                 locked ? "cursor-default" : "cursor-pointer"
               }`}
             >
-              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-bagoong text-ink font-display font-bold flex-shrink-0">
+              <span className="flex items-center justify-center w-7 h-7 rounded-full bg-bagoong text-night font-display font-bold flex-shrink-0">
                 {position + 1}
               </span>
               {items[slot]}

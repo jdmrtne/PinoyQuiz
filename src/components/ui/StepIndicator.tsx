@@ -40,8 +40,8 @@ export function StepIndicator({ steps, current, onStepClick }: StepIndicatorProp
               <span
                 className={clsx(
                   "flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold",
-                  state === "active" && "bg-mango text-ink",
-                  state === "done" && "bg-bagoong text-ink",
+                  state === "active" && "bg-mango text-night",
+                  state === "done" && "bg-bagoong text-night",
                   state === "upcoming" && "bg-ink-3 text-sampaguita/40"
                 )}
               >

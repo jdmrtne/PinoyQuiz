@@ -42,7 +42,7 @@ export function MultiSelectPills<T extends string>({
             className={clsx(
               "px-4 py-2.5 min-h-[2.75rem] rounded-full text-sm font-semibold border-2 transition-colors touch-manipulation",
               active
-                ? "bg-mango text-ink border-mango"
+                ? "bg-mango text-night border-mango"
                 : "bg-ink-2 text-sampaguita/80 border-ink-3 hover:border-mango/50"
             )}
           >

@@ -46,7 +46,7 @@ export function ModeCard({
       <span
         className={clsx(
           "flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center",
-          checked ? "bg-mango text-ink" : "bg-ink-3 text-sampaguita/70"
+          checked ? "bg-mango text-night" : "bg-ink-3 text-sampaguita/70"
         )}
       >
         <Icon className="w-5 h-5" aria-hidden="true" />
@@ -71,7 +71,7 @@ export function ModeCard({
         className={clsx(
           "flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center mt-0.5",
           checked
-            ? "bg-mango border-mango text-ink"
+            ? "bg-mango border-mango text-night"
             : "border-ink-3 text-transparent"
         )}
         aria-hidden="true"
