@@ -1,5 +1,47 @@
 # Changelog
 
+## Smart/Auto question timing + Game Setup redesign (0036) ✅
+
+Two asks handled together: a per-game Timing Strategy so question time
+doesn't have to be one flat number, and a Create Game screen restructured
+into a clearer step flow. See
+[docs/MASTER_HANDOFF.md](docs/MASTER_HANDOFF.md)'s "Smart/Auto question
+timing + Game Setup redesign (0036)" section for the full writeup — kept
+there rather than duplicated here since it's a continuation of the
+question-types track documented in that file, not the Phase 1-17 roadmap
+below.
+
+**Completed:**
+- `supabase/migrations/0036_smart_timing.sql` — `games.timing_strategy`
+  (`'fixed' | 'smart'`, default `'fixed'`), a new reusable
+  `calculate_question_time()` SQL function, and
+  `game_questions.effective_time_limit_seconds` (computed once at
+  `start_game`). `get_current_question`, all four `submit_*_answer`
+  functions, and `auto_advance_game` were redefined to read that one
+  column instead of each re-deriving the effective time limit inline.
+  `create_game` gained `p_timing_strategy` (default `'fixed'`, so every
+  existing caller keeps today's behavior); its old 10-param signature was
+  dropped first (same reasoning as 0034) to avoid a second ambiguous
+  overload.
+- `src/game-engine/questionTiming.ts` — client-side pure-function mirror
+  of the SQL calculation, for the Create Game Summary step's estimated
+  duration preview (new `questionTiming.test.ts`, 17 tests).
+- `src/pages/CreateGame.tsx` fully restructured into a 5-step flow
+  (Categories → Game Modes → Questions → Timing → Summary) with a new
+  `StepIndicator` and `ModeCard` (`src/components/ui/`). The old "Mixed
+  Mode (Beta)" checkbox is gone — picking any optional question type now
+  implicitly enables Mixed Mode.
+- `src/data/gameOptions.ts` — `QUESTION_TYPE_LABELS/DESCRIPTIONS/ICONS`
+  (all 8 types) and `TIMING_STRATEGY_LABELS/DESCRIPTIONS/OPTIONS`, plus
+  matching data-integrity tests in `gameOptions.test.ts` (27 tests total,
+  up from 20).
+- Verified `npx tsc -b`, `npx vitest run` (56/56 passing), and
+  `npx vite build` all pass. **The SQL migration has not been run against
+  a live/disposable Postgres** (no DB access in the environment it was
+  written in) — traced carefully against the 0030/0034 function bodies it
+  extends, but treat it as unverified until run through
+  `supabase db reset` + a real Smart Auto game.
+
 ## Phase 16b — General-knowledge category expansion (merged) ✅
 
 Merged in from a branch developed in parallel with Phase 17 (custom

@@ -724,3 +724,73 @@ past decisions" section above:
   explicit opt-in (a new column defaulting to the old behavior, a new
   checkbox defaulting off) rather than changing what a caller who does
   nothing differently gets.
+
+## Smart/Auto question timing + Game Setup redesign (0036)
+
+Two asks handled together, since the second was mostly the frontend
+surface for the first: (1) a per-game Timing Strategy so timing doesn't
+have to be one flat number for every question, and (2) redesigning the
+Create Game screen's mode/category/timing pickers into a clearer step
+flow (Categories → Game Modes → Questions → Timing → Summary).
+
+**Timing Strategy** (`games.timing_strategy`, `'fixed' | 'smart'`,
+default `'fixed'`) sits alongside the existing `time_limit_seconds`.
+Fixed is the pre-existing behavior unchanged. Smart derives each
+question's time from a new reusable `calculate_question_time()` SQL
+function — base seconds by `question_type`, plus additive bumps for
+prompt length, option length (multiple_choice/true_false), matching pair
+count, and sequence item count, rounded to the nearest 5s and clamped to
+[10, 60]. It's computed ONCE per question, at `start_game`, and stored on
+`game_questions.effective_time_limit_seconds` — not recomputed on every
+read. That meant redefining `get_current_question` and all four
+`submit_*_answer` functions plus `auto_advance_game` to read that one
+column instead of each re-deriving
+`coalesce(v_q.time_limit_override, v_game.time_limit_seconds)` inline —
+six call sites collapsed to one computation, same pattern as the
+shuffle_map/match_shuffle/sequence_shuffle values already being generated
+once at `start_game` and read stably afterward.
+`questions.time_limit_override` (content-author-set, from Phase 3) is
+untouched and still wins over both Fixed and Smart Auto.
+
+**Deliberately not built**: the third strategy the original brief
+mentioned as an optional "advanced" mode — a host manually overriding an
+individual question's time before the game starts. Questions aren't
+queryable by the client pre-game (the host plays too, so exposing prompts
+would leak answers same as it would to anyone else — see the anti-cheat
+design), so a real per-question override UI needs its own
+question-preview surface that doesn't exist yet. Same category of gap as
+the admin/question-authoring UI already noted above — flagged here
+instead of half-built.
+
+**Frontend** (`src/pages/CreateGame.tsx` fully restructured):
+- `src/game-engine/questionTiming.ts` — pure-function mirror of the SQL
+  calculation, used only for the pre-game Summary preview (before real
+  questions are known, so it shows typical-case estimates per type, not
+  the exact numbers a real Smart Auto game will land on).
+- `src/components/ui/ModeCard.tsx` — icon + name + description +
+  checked-state row, used for the Game Modes step. `multiple_choice`
+  renders locked/checked (it's always on; there's no pill to turn it
+  off) — same "always included" property `CreateGame.tsx` already had,
+  just made visible instead of implicit.
+- `src/components/ui/StepIndicator.tsx` — numbered step nav, tappable to
+  jump back to a completed step.
+- Existing settings (category picker, difficulty, question count, Game
+  Flow/Answer Behavior) are unchanged in substance, just redistributed
+  across the new steps instead of one long scrolling form. The old
+  "Mixed Mode (Beta)" on/off checkbox is gone — selecting any optional
+  mode now implicitly turns Mixed Mode on, which is what the checkbox
+  amounted to anyway.
+- `src/data/gameOptions.ts` gained `QUESTION_TYPE_LABELS/DESCRIPTIONS/ICONS`
+  (all 8 types, replacing the old `OPTIONAL_QUESTION_TYPE_LABELS` which
+  only covered 7) and `TIMING_STRATEGY_LABELS/DESCRIPTIONS/OPTIONS`.
+
+**Verified**: `npx tsc -b`, `npx vitest run` (56/56 passing, including
+new `questionTiming.test.ts` and expanded `gameOptions.test.ts` coverage
+for the new option maps), and `npx vite build` all pass. The SQL migration
+itself has **not** been run against a live/disposable Postgres instance —
+no DB access in the environment this was written in — so it's unverified
+beyond careful tracing against the 0030/0034 bodies it was built from.
+Test before relying on it: `supabase db reset` (or equivalent), then spin
+up a game with `timing_strategy = 'smart'` and confirm
+`game_questions.effective_time_limit_seconds` lands in [10, 60] and
+roughly tracks question complexity as described above.

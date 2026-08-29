@@ -1,3 +1,14 @@
+import {
+  CheckCircle2,
+  ToggleLeft,
+  Type,
+  TextCursorInput,
+  Shuffle,
+  Link2,
+  Image as ImageIcon,
+  ListOrdered,
+  type LucideIcon,
+} from "lucide-react";
 import type {
   GameCategorySetting,
   GameDifficultySetting,
@@ -5,6 +16,7 @@ import type {
   AnswerBehaviorRow,
   QuestionCategoryRow,
   QuestionTypeRow,
+  TimingStrategyRow,
 } from "../types/database.types";
 
 export const CATEGORY_LABELS: Record<GameCategorySetting, string> = {
@@ -226,16 +238,15 @@ export const ANSWER_BEHAVIOR_OPTIONS: AnswerBehaviorRow[] = [
   "CHANGE_UNTIL_TIMER_ENDS",
 ];
 
-// Added Question-Types Phase 3 (0030_question_types_phase3.sql) — Mixed
-// Mode's explicit type picker. multiple_choice is deliberately absent
-// from this list: it's always included (see CreateGame.tsx, which
-// prepends it before sending enabledQuestionTypes), so there's no pill
-// for something that can't actually be turned off.
-export const OPTIONAL_QUESTION_TYPE_LABELS: Record<
-  Exclude<QuestionTypeRow, "multiple_choice">,
-  string
-> = {
-  true_false: "True/False",
+// Added Question-Types Phase 3 (0030_question_types_phase3.sql), expanded
+// in the Game Setup redesign to cover every type (including
+// multiple_choice) with an icon + short description for the Step 2 "Game
+// Modes" picker (ModeCard). multiple_choice is always enabled and its
+// card renders locked/checked — see CreateGame.tsx — but still needs a
+// label/description/icon here like every other type.
+export const QUESTION_TYPE_LABELS: Record<QuestionTypeRow, string> = {
+  multiple_choice: "Multiple Choice",
+  true_false: "True / False",
   identification: "Identification",
   fill_blank: "Fill in the Blank",
   unscramble: "Unscramble",
@@ -244,6 +255,35 @@ export const OPTIONAL_QUESTION_TYPE_LABELS: Record<
   sequence: "Sequence",
 };
 
+export const QUESTION_TYPE_DESCRIPTIONS: Record<QuestionTypeRow, string> = {
+  multiple_choice: "Choose the correct answer from four options.",
+  true_false: "Decide whether the statement is true or false.",
+  identification: "Type the answer from memory — no options shown.",
+  fill_blank: "Type the missing word or phrase.",
+  unscramble: "Unscramble the shuffled letters to spell the answer.",
+  matching: "Pair up terms with their matching definitions.",
+  image: "Identify what's shown in the picture.",
+  sequence: "Put the items in the correct order.",
+};
+
+export const QUESTION_TYPE_ICONS: Record<QuestionTypeRow, LucideIcon> = {
+  multiple_choice: CheckCircle2,
+  true_false: ToggleLeft,
+  identification: Type,
+  fill_blank: TextCursorInput,
+  unscramble: Shuffle,
+  matching: Link2,
+  image: ImageIcon,
+  sequence: ListOrdered,
+};
+
+export const QUESTION_TYPE_OPTIONS: QuestionTypeRow[] = Object.keys(
+  QUESTION_TYPE_LABELS
+) as QuestionTypeRow[];
+
+// multiple_choice is always included — it's the one type that can't be
+// turned off (see CreateGame.tsx's locked ModeCard) — so it's excluded
+// from the *optional* list a host actually toggles.
 export const OPTIONAL_QUESTION_TYPE_OPTIONS: Exclude<
   QuestionTypeRow,
   "multiple_choice"
@@ -256,3 +296,17 @@ export const OPTIONAL_QUESTION_TYPE_OPTIONS: Exclude<
   "image",
   "sequence",
 ];
+
+// Added 0036_smart_timing.sql.
+export const TIMING_STRATEGY_LABELS: Record<TimingStrategyRow, string> = {
+  fixed: "Fixed Time",
+  smart: "Smart / Auto Time",
+};
+
+export const TIMING_STRATEGY_DESCRIPTIONS: Record<TimingStrategyRow, string> = {
+  fixed: "Every question gets the same number of seconds.",
+  smart:
+    "The time per question is calculated automatically from its type and complexity — short questions run faster, complex ones get more time.",
+};
+
+export const TIMING_STRATEGY_OPTIONS: TimingStrategyRow[] = ["fixed", "smart"];

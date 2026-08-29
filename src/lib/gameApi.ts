@@ -8,6 +8,7 @@ import type {
   AnswerBehaviorRow,
   QuestionCategoryRow,
   QuestionTypeRow,
+  TimingStrategyRow,
 } from "../types/database.types";
 import type { AnswerReveal, LeaderboardEntry } from "../types/game";
 
@@ -112,6 +113,14 @@ export interface CreateGameParams {
    * when set (see resolve_enabled_question_types in that migration).
    */
   enabledQuestionTypes?: QuestionTypeRow[];
+  /**
+   * Smart timing (0036 migration). Defaults to "fixed" server-side (every
+   * question gets timeLimitSeconds, identical to pre-0036 behavior). Set
+   * "smart" to have each question's time derived from its own content
+   * instead — see src/game-engine/questionTiming.ts for the client-side
+   * preview shown on Create Game before this is sent.
+   */
+  timingStrategy?: TimingStrategyRow;
 }
 
 export interface CreateGameResult {
@@ -134,6 +143,7 @@ export async function createGame(
     p_categories: params.categories,
     p_include_new_question_types: params.includeNewQuestionTypes,
     p_enabled_question_types: params.enabledQuestionTypes,
+    p_timing_strategy: params.timingStrategy,
   });
   return {
     gameId: row.out_game_id,

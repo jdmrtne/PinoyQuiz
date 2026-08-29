@@ -16,6 +16,14 @@ import {
   ANSWER_BEHAVIOR_LABELS,
   ANSWER_BEHAVIOR_DESCRIPTIONS,
   ANSWER_BEHAVIOR_OPTIONS,
+  QUESTION_TYPE_LABELS,
+  QUESTION_TYPE_DESCRIPTIONS,
+  QUESTION_TYPE_ICONS,
+  QUESTION_TYPE_OPTIONS,
+  OPTIONAL_QUESTION_TYPE_OPTIONS,
+  TIMING_STRATEGY_LABELS,
+  TIMING_STRATEGY_DESCRIPTIONS,
+  TIMING_STRATEGY_OPTIONS,
 } from "./gameOptions";
 
 // These option lists back the CreateGame settings pills (SelectPills) and
@@ -178,6 +186,65 @@ describe("gameOptions data integrity", () => {
       expect(
         categoryDisplayLabel("random", ["science", "medical", "history"])
       ).toBe("Custom Mix (3)");
+    });
+  });
+
+  // 0036_smart_timing.sql / the Game Setup redesign — the Step 2 "Game
+  // Modes" picker (ModeCard) needs a label, description, AND icon for
+  // every question type, including multiple_choice (which renders
+  // locked/checked rather than via OPTIONAL_QUESTION_TYPE_OPTIONS). Same
+  // orphan/missing-entry failure mode as the category/game-mode checks
+  // above: a type present in one map but not another renders broken or
+  // silently invisible.
+  describe("question type modes", () => {
+    it("has a label, description, and icon for every question type option, and no orphans", () => {
+      expect(new Set(QUESTION_TYPE_OPTIONS)).toEqual(
+        new Set(Object.keys(QUESTION_TYPE_LABELS))
+      );
+      expect(new Set(QUESTION_TYPE_OPTIONS)).toEqual(
+        new Set(Object.keys(QUESTION_TYPE_DESCRIPTIONS))
+      );
+      expect(new Set(QUESTION_TYPE_OPTIONS)).toEqual(
+        new Set(Object.keys(QUESTION_TYPE_ICONS))
+      );
+    });
+
+    it("always includes multiple_choice (the one type that can't be turned off)", () => {
+      expect(QUESTION_TYPE_OPTIONS).toContain("multiple_choice");
+    });
+
+    it("OPTIONAL_QUESTION_TYPE_OPTIONS is every question type except multiple_choice, with no duplicates", () => {
+      const expected = QUESTION_TYPE_OPTIONS.filter((t) => t !== "multiple_choice");
+      expect(new Set(OPTIONAL_QUESTION_TYPE_OPTIONS)).toEqual(new Set(expected));
+      expect(OPTIONAL_QUESTION_TYPE_OPTIONS.length).toBe(expected.length);
+      expect(OPTIONAL_QUESTION_TYPE_OPTIONS).not.toContain("multiple_choice");
+    });
+
+    it("has no blank or duplicate question type labels", () => {
+      const labels = Object.values(QUESTION_TYPE_LABELS);
+      expect(labels.every((l) => l.trim().length > 0)).toBe(true);
+      expect(new Set(labels).size).toBe(labels.length);
+    });
+
+    it("has a non-blank description for every question type", () => {
+      const descriptions = Object.values(QUESTION_TYPE_DESCRIPTIONS);
+      expect(descriptions.every((d) => d.trim().length > 0)).toBe(true);
+    });
+  });
+
+  // 0036_smart_timing.sql — Step 4's Fixed vs Smart Auto picker.
+  describe("timing strategy", () => {
+    it("has a label and description for every timing strategy option, and no orphans", () => {
+      expect(new Set(TIMING_STRATEGY_OPTIONS)).toEqual(
+        new Set(Object.keys(TIMING_STRATEGY_LABELS))
+      );
+      expect(new Set(TIMING_STRATEGY_OPTIONS)).toEqual(
+        new Set(Object.keys(TIMING_STRATEGY_DESCRIPTIONS))
+      );
+    });
+
+    it("always includes 'fixed' as a timing strategy option (the pre-existing server-side default)", () => {
+      expect(TIMING_STRATEGY_OPTIONS).toContain("fixed");
     });
   });
 });

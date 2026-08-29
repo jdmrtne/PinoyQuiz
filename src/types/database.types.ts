@@ -93,6 +93,13 @@ export type QuestionTypeRow =
 export type GameModeRow = "HOST_CONTROLLED" | "AUTOMATIC";
 export type AnswerBehaviorRow = "LOCK_ON_SELECTION" | "CHANGE_UNTIL_TIMER_ENDS";
 
+// Added 0036_smart_timing.sql. Defaults to "fixed" server-side, so every
+// existing game row/caller keeps today's flat-time_limit_seconds
+// behavior. "smart" derives each question's time from its content via
+// calculate_question_time() at start_game — see src/game-engine/questionTiming.ts
+// for the client-side mirror used for the Create Game preview.
+export type TimingStrategyRow = "fixed" | "smart";
+
 // Added in 0022_custom_category_mix.sql. Null/undefined (or an empty
 // array) means "no custom mix" — the single `category`/`GameCategorySetting`
 // column governs selection instead, exactly as before this feature. When
@@ -131,6 +138,8 @@ export interface Database {
           include_new_question_types: boolean;
           /** Added 0030_question_types_phase3.sql — explicit Mixed Mode type selection. Null falls back to include_new_question_types. */
           enabled_question_types: QuestionTypeRow[] | null;
+          /** Added 0036_smart_timing.sql — "fixed" (default) or "smart". See TimingStrategyRow. */
+          timing_strategy: TimingStrategyRow;
           created_at: string;
           started_at: string | null;
           finished_at: string | null;
@@ -207,6 +216,8 @@ export interface Database {
           match_shuffle: number[] | null;
           /** Added 0030_question_types_phase3.sql — per-game displayed-slot mapping for sequence, same convention as shuffle_map. */
           sequence_shuffle: number[] | null;
+          /** Added 0036_smart_timing.sql — this question's resolved seconds for this game, computed once at start_game (time_limit_override, else calculate_question_time() when the game is "smart", else the game's flat time_limit_seconds). */
+          effective_time_limit_seconds: number;
         };
         Insert: Partial<Database["public"]["Tables"]["game_questions"]["Row"]>;
         Update: Partial<Database["public"]["Tables"]["game_questions"]["Row"]>;
@@ -279,6 +290,8 @@ export interface Database {
           p_include_new_question_types?: boolean;
           /** Added 0030_question_types_phase3.sql — explicit Mixed Mode type selection; takes precedence over p_include_new_question_types when set. */
           p_enabled_question_types?: QuestionTypeRow[] | null;
+          /** Added 0036_smart_timing.sql. Defaults to "fixed" server-side. */
+          p_timing_strategy?: TimingStrategyRow;
         };
         Returns: {
           out_game_id: string;
@@ -345,7 +358,7 @@ export interface Database {
           out_sequence_items: string[] | null;
           out_order: number;
           out_total: number;
-          /** Effective per-question value (questions.time_limit_override if set, else the game's default) as of 0030. */
+          /** Effective per-question value, resolved once at start_game (0036): questions.time_limit_override if set, else calculate_question_time() when the game's timing_strategy is "smart", else the game's flat time_limit_seconds. */
           out_time_limit_seconds: number;
           out_question_started_at: string;
         }[];
@@ -468,6 +481,8 @@ export interface Database {
       answer_behavior: AnswerBehaviorRow;
       /** Added 0026_question_types_phase1.sql. */
       question_type: QuestionTypeRow;
+      /** Added 0036_smart_timing.sql. */
+      timing_strategy: TimingStrategyRow;
     };
   };
 }
