@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
+import { QuestionImage } from "./QuestionImage";
 import { useServerTimer } from "../../hooks/useServerTimer";
 import type { CurrentQuestion } from "../../lib/gameApi";
 
@@ -85,13 +86,7 @@ export function QuestionScreen({
         </Card>
 
         {question.questionType === "image" && question.imageUrl && (
-          <Card className="p-2 overflow-hidden">
-            <img
-              src={question.imageUrl}
-              alt="Identify this"
-              className="w-full max-h-72 object-cover rounded-xl"
-            />
-          </Card>
+          <QuestionImage src={question.imageUrl} />
         )}
 
         {question.questionType === "unscramble" && question.scrambleLetters && (

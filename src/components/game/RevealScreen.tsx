@@ -1,5 +1,6 @@
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
+import { QuestionImage } from "./QuestionImage";
 import type { AnswerReveal, CurrentQuestion } from "../../lib/gameApi";
 
 const OPTION_LETTERS = ["A", "B", "C", "D"] as const;
@@ -71,13 +72,7 @@ export function RevealScreen({
         </Card>
 
         {reveal.questionType === "image" && reveal.imageUrl && (
-          <Card className="p-2 overflow-hidden">
-            <img
-              src={reveal.imageUrl}
-              alt="Identify this"
-              className="w-full max-h-72 object-cover rounded-xl"
-            />
-          </Card>
+          <QuestionImage src={reveal.imageUrl} />
         )}
 
         {isMatching ? (
