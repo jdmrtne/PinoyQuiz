@@ -241,9 +241,9 @@ export const ANSWER_BEHAVIOR_OPTIONS: AnswerBehaviorRow[] = [
 // Added Question-Types Phase 3 (0030_question_types_phase3.sql), expanded
 // in the Game Setup redesign to cover every type (including
 // multiple_choice) with an icon + short description for the Step 2 "Game
-// Modes" picker (ModeCard). multiple_choice is always enabled and its
-// card renders locked/checked — see CreateGame.tsx — but still needs a
-// label/description/icon here like every other type.
+// Modes" picker (ModeCard). Every type here — multiple_choice included —
+// is a plain toggleable card; the host must enable at least one (see
+// CreateGame.tsx's Step 2 validation) but none is locked or forced on.
 export const QUESTION_TYPE_LABELS: Record<QuestionTypeRow, string> = {
   multiple_choice: "Multiple Choice",
   true_false: "True / False",
@@ -280,22 +280,6 @@ export const QUESTION_TYPE_ICONS: Record<QuestionTypeRow, LucideIcon> = {
 export const QUESTION_TYPE_OPTIONS: QuestionTypeRow[] = Object.keys(
   QUESTION_TYPE_LABELS
 ) as QuestionTypeRow[];
-
-// multiple_choice is always included — it's the one type that can't be
-// turned off (see CreateGame.tsx's locked ModeCard) — so it's excluded
-// from the *optional* list a host actually toggles.
-export const OPTIONAL_QUESTION_TYPE_OPTIONS: Exclude<
-  QuestionTypeRow,
-  "multiple_choice"
->[] = [
-  "true_false",
-  "identification",
-  "fill_blank",
-  "unscramble",
-  "matching",
-  "image",
-  "sequence",
-];
 
 // Added 0036_smart_timing.sql.
 export const TIMING_STRATEGY_LABELS: Record<TimingStrategyRow, string> = {

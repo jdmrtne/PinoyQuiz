@@ -20,7 +20,6 @@ import {
   QUESTION_TYPE_DESCRIPTIONS,
   QUESTION_TYPE_ICONS,
   QUESTION_TYPE_OPTIONS,
-  OPTIONAL_QUESTION_TYPE_OPTIONS,
   TIMING_STRATEGY_LABELS,
   TIMING_STRATEGY_DESCRIPTIONS,
   TIMING_STRATEGY_OPTIONS,
@@ -189,13 +188,14 @@ describe("gameOptions data integrity", () => {
     });
   });
 
-  // 0036_smart_timing.sql / the Game Setup redesign — the Step 2 "Game
+  // 0036_smart_timing.sql / the Game Setup redesign, updated by
+  // 0037_host_pause_resume.sql's "MCQ optional" change — the Step 2 "Game
   // Modes" picker (ModeCard) needs a label, description, AND icon for
-  // every question type, including multiple_choice (which renders
-  // locked/checked rather than via OPTIONAL_QUESTION_TYPE_OPTIONS). Same
-  // orphan/missing-entry failure mode as the category/game-mode checks
-  // above: a type present in one map but not another renders broken or
-  // silently invisible.
+  // every question type, all of them plain toggleable cards now
+  // (multiple_choice included — see gameOptions.ts's comment on
+  // QUESTION_TYPE_LABELS). Same orphan/missing-entry failure mode as the
+  // category/game-mode checks above: a type present in one map but not
+  // another renders broken or silently invisible.
   describe("question type modes", () => {
     it("has a label, description, and icon for every question type option, and no orphans", () => {
       expect(new Set(QUESTION_TYPE_OPTIONS)).toEqual(
@@ -209,15 +209,8 @@ describe("gameOptions data integrity", () => {
       );
     });
 
-    it("always includes multiple_choice (the one type that can't be turned off)", () => {
+    it("includes multiple_choice as one option among the rest (no longer locked/forced on)", () => {
       expect(QUESTION_TYPE_OPTIONS).toContain("multiple_choice");
-    });
-
-    it("OPTIONAL_QUESTION_TYPE_OPTIONS is every question type except multiple_choice, with no duplicates", () => {
-      const expected = QUESTION_TYPE_OPTIONS.filter((t) => t !== "multiple_choice");
-      expect(new Set(OPTIONAL_QUESTION_TYPE_OPTIONS)).toEqual(new Set(expected));
-      expect(OPTIONAL_QUESTION_TYPE_OPTIONS.length).toBe(expected.length);
-      expect(OPTIONAL_QUESTION_TYPE_OPTIONS).not.toContain("multiple_choice");
     });
 
     it("has no blank or duplicate question type labels", () => {

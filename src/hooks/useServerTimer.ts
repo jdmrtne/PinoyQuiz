@@ -11,10 +11,20 @@ import { computeRemainingSeconds } from "../game-engine/timeRemaining";
  * The actual math lives in src/game-engine/timeRemaining.ts (Phase 11) so
  * it can be unit tested directly; this hook is just that function plus the
  * re-render tick.
+ *
+ * Host pause (0037_host_pause_resume.sql): while `pausedAtIso` is set, the
+ * countdown freezes — computeRemainingSeconds is called with `pausedAtIso`
+ * standing in for "now" instead of the real wall clock, and the re-render
+ * interval stops entirely, so the displayed value stays exactly where it
+ * was the instant the host paused. resume_game shifts `startedAtIso`
+ * forward (via games.question_started_at, kept live over Realtime) by
+ * however long the pause lasted, so once unpaused this same math picks up
+ * counting down from that frozen value with no special-casing needed here.
  */
 export function useServerTimer(
   startedAtIso: string | null,
-  durationSeconds: number
+  durationSeconds: number,
+  pausedAtIso: string | null = null
 ): number {
   // Only used to force a re-render every 250ms so the returned value below
   // stays fresh. The actual remaining-time value is computed synchronously
@@ -27,10 +37,12 @@ export function useServerTimer(
   const [, forceRerender] = useState(0);
 
   useEffect(() => {
-    if (!startedAtIso) return;
+    if (!startedAtIso || pausedAtIso) return;
     const interval = setInterval(() => forceRerender((n) => n + 1), 250);
     return () => clearInterval(interval);
-  }, [startedAtIso]);
+  }, [startedAtIso, pausedAtIso]);
 
-  return computeRemainingSeconds(startedAtIso, durationSeconds);
+  return pausedAtIso
+    ? computeRemainingSeconds(startedAtIso, durationSeconds, new Date(pausedAtIso).getTime())
+    : computeRemainingSeconds(startedAtIso, durationSeconds);
 }

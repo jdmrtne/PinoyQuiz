@@ -34,19 +34,24 @@ const ACTIVE_STATUSES: GameStatusRow[] = [
  * reaches every client through the existing Realtime subscription
  * (useGameRealtime) — this hook never touches local state directly.
  *
- * No-op for Host-Controlled games, before gameId/playerId are known, or
- * once the game isn't in a timed phase.
+ * No-op for Host-Controlled games, before gameId/playerId are known, once
+ * the game isn't in a timed phase, or while the host has the game paused
+ * (0037_host_pause_resume.sql) — auto_advance_game already no-ops itself
+ * while paused, so this is purely to stop the pointless polling client-side
+ * for as long as the pause lasts.
  */
 export function useAutoAdvance(
   gameId: string | null,
   playerId: string | null,
   gameMode: GameModeRow | null,
-  status: GameStatusRow | null
+  status: GameStatusRow | null,
+  isPaused: boolean = false
 ): void {
   useEffect(() => {
     if (!gameId || !playerId) return;
     if (gameMode !== "AUTOMATIC") return;
     if (!status || !ACTIVE_STATUSES.includes(status)) return;
+    if (isPaused) return;
 
     let cancelled = false;
     function tick() {
@@ -63,5 +68,5 @@ export function useAutoAdvance(
       cancelled = true;
       clearInterval(interval);
     };
-  }, [gameId, playerId, gameMode, status]);
+  }, [gameId, playerId, gameMode, status, isPaused]);
 }

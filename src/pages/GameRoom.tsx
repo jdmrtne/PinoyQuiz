@@ -9,6 +9,8 @@ import { QuestionScreen } from "../components/game/QuestionScreen";
 import { RevealScreen } from "../components/game/RevealScreen";
 import { LeaderboardScreen } from "../components/game/LeaderboardScreen";
 import { HostDisconnectedBanner } from "../components/game/HostDisconnectedBanner";
+import { PauseOverlay } from "../components/game/PauseOverlay";
+import { PauseButton } from "../components/game/PauseButton";
 import { categoryDisplayLabel, DIFFICULTY_LABELS, GAME_MODE_LABELS, ANSWER_BEHAVIOR_LABELS } from "../data/gameOptions";
 import { useGameRealtime } from "../hooks/useGameRealtime";
 import { useServerTimer } from "../hooks/useServerTimer";
@@ -30,6 +32,8 @@ import {
   getLeaderboard,
   advanceQuestion,
   claimHost,
+  pauseGame,
+  resumeGame,
   GameApiError,
   type CurrentQuestion,
   type AnswerReveal,
@@ -53,6 +57,8 @@ export default function GameRoom() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [claimingHost, setClaimingHost] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const endQuestionCalledRef = useRef<string | null>(null);
 
   // Phase 8: "who am I in this game" no longer relies solely on
@@ -69,6 +75,13 @@ export default function GameRoom() {
   const myPlayer = players.find((p) => p.user_id === userId) ?? null;
   const isHost = myPlayer?.is_host ?? navState?.isHost ?? false;
   const currentPlayerId = myPlayer?.id ?? navState?.playerId ?? null;
+
+  // Host pause/resume (0037_host_pause_resume.sql). `game.is_paused` lives
+  // on the same row every client already subscribes to (useGameRealtime),
+  // so this reaches every participant — including one who joins or
+  // reconnects mid-pause, via that same row's initial fetch — with no
+  // extra plumbing.
+  const isPaused = game?.is_paused ?? false;
 
   // Keep this player's connected/last_seen_at fresh, and opportunistically
   // sweep the roster for anyone who's gone stale — see useHeartbeat.ts and
@@ -89,7 +102,8 @@ export default function GameRoom() {
     game?.id ?? null,
     currentPlayerId,
     game?.game_mode ?? null,
-    game?.status ?? null
+    game?.status ?? null,
+    isPaused
   );
 
   // The live host row (if any) — used both to show "N connected" context
@@ -212,13 +226,22 @@ export default function GameRoom() {
   // questions.sql) can legitimately serve the same question again in a
   // later round, and current_question_id is guaranteed unique per round
   // even then, where questionId is not.
+  // Host pause (0037_host_pause_resume.sql): read the start timestamp off
+  // the live `game` row rather than the static snapshot captured in
+  // `question` at fetch time — resume_game shifts games.question_started_at
+  // forward by the pause duration, and that shift only reaches this timer
+  // if it's watching the column that's actually kept live over Realtime.
+  // Falls back to the question snapshot for the brief window before the
+  // first realtime-backed game row includes it.
   const remaining = useServerTimer(
-    question?.questionStartedAt ?? null,
-    question?.timeLimitSeconds ?? 0
+    game?.question_started_at ?? question?.questionStartedAt ?? null,
+    question?.timeLimitSeconds ?? 0,
+    isPaused ? game?.paused_at ?? null : null
   );
   useEffect(() => {
     if (isAutomatic) return;
     if (!isHost || !game || game.status !== "QUESTION" || !question) return;
+    if (isPaused) return;
     if (remaining > 0) return;
     if (endQuestionCalledRef.current === game.current_question_id) return;
     endQuestionCalledRef.current = game.current_question_id;
@@ -229,7 +252,7 @@ export default function GameRoom() {
         err instanceof GameApiError ? err.message : "Couldn't end the question."
       );
     });
-  }, [isAutomatic, isHost, game, question, remaining]);
+  }, [isAutomatic, isHost, game, question, remaining, isPaused]);
 
   async function handleStart() {
     if (!game) return;
@@ -398,6 +421,40 @@ export default function GameRoom() {
     }
   }
 
+  async function handlePause() {
+    if (!game || !isHost) return;
+    setActionError(null);
+    setPausing(true);
+    try {
+      await pauseGame(game.id);
+      // is_paused -> true arrives via Realtime for everyone, including
+      // this client — no local state mutation needed.
+    } catch (err) {
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't pause the game."
+      );
+    } finally {
+      setPausing(false);
+    }
+  }
+
+  async function handleResume() {
+    if (!game || !isHost) return;
+    setActionError(null);
+    setResuming(true);
+    try {
+      await resumeGame(game.id);
+      // is_paused -> false (plus the shifted timer timestamps) arrives via
+      // Realtime for everyone.
+    } catch (err) {
+      setActionError(
+        err instanceof GameApiError ? err.message : "Couldn't resume the game."
+      );
+    } finally {
+      setResuming(false);
+    }
+  }
+
   if (state.status === "loading") {
     return (
       <div className="min-h-dvh flex items-center justify-center">
@@ -442,7 +499,25 @@ export default function GameRoom() {
     );
   }
 
+  // Host pause (0037_host_pause_resume.sql): a floating Pause control for
+  // the host, shown across every phase pausing is offered in (QUESTION/
+  // REVEAL/LEADERBOARD — see the migration header for why COUNTDOWN/
+  // WAITING/FINISHED don't get one), swapped for nothing once already
+  // paused (the overlay below carries the Resume control instead).
+  const pauseControl =
+    isHost && !isPaused ? (
+      <PauseButton onPause={handlePause} pausing={pausing} />
+    ) : null;
+
   if (game.status === "QUESTION") {
+    if (isPaused) {
+      return (
+        <>
+          {disconnectBanner}
+          <PauseOverlay isHost={isHost} onResume={handleResume} resuming={resuming} />
+        </>
+      );
+    }
     if (!question) {
       return (
         <div className="min-h-dvh flex items-center justify-center">
@@ -453,6 +528,7 @@ export default function GameRoom() {
     return (
       <>
         {disconnectBanner}
+        {pauseControl}
         <QuestionScreen
           question={question}
           answeredIndex={answeredIndex}
@@ -471,6 +547,14 @@ export default function GameRoom() {
   }
 
   if (game.status === "REVEAL") {
+    if (isPaused) {
+      return (
+        <>
+          {disconnectBanner}
+          <PauseOverlay isHost={isHost} onResume={handleResume} resuming={resuming} />
+        </>
+      );
+    }
     if (!question || !reveal) {
       return (
         <div className="min-h-dvh flex items-center justify-center">
@@ -481,6 +565,7 @@ export default function GameRoom() {
     return (
       <>
         {disconnectBanner}
+        {pauseControl}
         <RevealScreen
           question={question}
           reveal={reveal}
@@ -494,6 +579,14 @@ export default function GameRoom() {
   }
 
   if (game.status === "LEADERBOARD") {
+    if (isPaused) {
+      return (
+        <>
+          {disconnectBanner}
+          <PauseOverlay isHost={isHost} onResume={handleResume} resuming={resuming} />
+        </>
+      );
+    }
     if (!leaderboard) {
       return (
         <div className="min-h-dvh flex items-center justify-center">
@@ -505,6 +598,7 @@ export default function GameRoom() {
     return (
       <>
         {disconnectBanner}
+        {pauseControl}
         <LeaderboardScreen
           entries={leaderboard}
           currentPlayerId={currentPlayerId}

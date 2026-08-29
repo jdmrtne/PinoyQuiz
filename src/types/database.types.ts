@@ -140,6 +140,10 @@ export interface Database {
           enabled_question_types: QuestionTypeRow[] | null;
           /** Added 0036_smart_timing.sql — "fixed" (default) or "smart". See TimingStrategyRow. */
           timing_strategy: TimingStrategyRow;
+          /** Added 0037_host_pause_resume.sql — host-toggled pause, freezing whichever of QUESTION/REVEAL/LEADERBOARD the game is already in. */
+          is_paused: boolean;
+          /** Added 0037_host_pause_resume.sql — when the current pause began. Null while not paused. */
+          paused_at: string | null;
           created_at: string;
           started_at: string | null;
           finished_at: string | null;
@@ -466,6 +470,16 @@ export interface Database {
         Returns: undefined;
       };
       play_again: {
+        Args: { p_game_id: string };
+        Returns: undefined;
+      };
+      /** Added 0037_host_pause_resume.sql — host-only. Valid only while status is QUESTION/REVEAL/LEADERBOARD. */
+      pause_game: {
+        Args: { p_game_id: string };
+        Returns: undefined;
+      };
+      /** Added 0037_host_pause_resume.sql — host-only. Shifts question_started_at/phase_started_at forward by the pause's real duration. */
+      resume_game: {
         Args: { p_game_id: string };
         Returns: undefined;
       };

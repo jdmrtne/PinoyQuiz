@@ -26,7 +26,7 @@ import {
   QUESTION_TYPE_LABELS,
   QUESTION_TYPE_DESCRIPTIONS,
   QUESTION_TYPE_ICONS,
-  OPTIONAL_QUESTION_TYPE_OPTIONS,
+  QUESTION_TYPE_OPTIONS,
   TIMING_STRATEGY_LABELS,
   TIMING_STRATEGY_DESCRIPTIONS,
   TIMING_STRATEGY_OPTIONS,
@@ -80,15 +80,15 @@ export default function CreateGame() {
   const CATEGORY_SECTION_LABELS = CATEGORY_SECTIONS.map((s) => s.label);
   const [categorySection, setCategorySection] = useState(CATEGORY_SECTION_LABELS[0]);
 
-  // Game Modes (question types). multiple_choice is always on — its
-  // ModeCard renders locked+checked; a host enables any others by
-  // checking their card. Real Mixed Mode (enabledQuestionTypes) is only
-  // sent to create_game when at least one extra type is selected — an
-  // empty selection is identical to "just Multiple Choice", which is
-  // also create_game's own default when this param is omitted.
-  const [extraQuestionTypes, setExtraQuestionTypes] = useState<
-    Exclude<QuestionTypeRow, "multiple_choice">[]
-  >([]);
+  // Game Modes (question types). Every type, including Multiple Choice,
+  // is a plain toggleable ModeCard now — none is locked or force-enabled
+  // (0037_host_pause_resume.sql's "MCQ optional" change). Multiple Choice
+  // starts pre-checked as a sensible default (matching the game's
+  // long-standing behavior), but the host can uncheck it like any other
+  // card; validateStep below requires at least one type stay selected.
+  const [enabledQuestionTypes, setEnabledQuestionTypes] = useState<
+    QuestionTypeRow[]
+  >(["multiple_choice"]);
 
   const [difficulty, setDifficulty] = useState<GameDifficultySetting>("mixed");
   const [questionCount, setQuestionCount] = useState(10);
@@ -106,13 +106,10 @@ export default function CreateGame() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const enabledTypes = useMemo<QuestionTypeRow[]>(
-    () => ["multiple_choice", ...extraQuestionTypes],
-    [extraQuestionTypes]
-  );
+  const enabledTypes = enabledQuestionTypes;
 
-  function toggleType(type: Exclude<QuestionTypeRow, "multiple_choice">) {
-    setExtraQuestionTypes((prev) =>
+  function toggleType(type: QuestionTypeRow) {
+    setEnabledQuestionTypes((prev) =>
       prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
     );
   }
@@ -150,6 +147,11 @@ export default function CreateGame() {
         return "Pick at least one category for your custom mix.";
       }
     }
+    if (i === 1) {
+      if (enabledQuestionTypes.length < 1) {
+        return "Select at least one game mode.";
+      }
+    }
     return null;
   }
 
@@ -170,11 +172,13 @@ export default function CreateGame() {
 
   async function handleSubmit() {
     setError(null);
-    const stepErr = validateStep(0);
-    if (stepErr) {
-      setError(stepErr);
-      setStep(0);
-      return;
+    for (const i of [0, 1]) {
+      const stepErr = validateStep(i);
+      if (stepErr) {
+        setError(stepErr);
+        setStep(i);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -188,13 +192,11 @@ export default function CreateGame() {
         hostNickname: nickname.trim(),
         gameMode,
         answerBehavior,
-        // Real Mixed Mode: multiple_choice is always included (there's no
-        // card to remove it), so it's prepended via enabledTypes rather
-        // than making the picker redundantly offer to turn off the one
-        // type every game has always had. Only sent when the host turned
-        // on at least one extra type — an empty selection is identical to
-        // omitting this param.
-        enabledQuestionTypes: extraQuestionTypes.length > 0 ? enabledTypes : undefined,
+        // Multiple Choice is a plain toggleable mode now like any other
+        // (0037_host_pause_resume.sql's "MCQ optional" change) — always
+        // send the host's actual selection rather than special-casing it
+        // in or out. validateStep(1) above guarantees this is non-empty.
+        enabledQuestionTypes: enabledTypes,
         timingStrategy,
       });
       navigate(`/game/${result.roomCode}`, {
@@ -312,7 +314,10 @@ export default function CreateGame() {
             </>
           )}
 
-          {/* Step 2 — Game Modes: which question types are in play. */}
+          {/* Step 2 — Game Modes: which question types are in play. Every
+              type (Multiple Choice included) is a plain toggleable card
+              now — none is locked or forced on
+              (0037_host_pause_resume.sql's "MCQ optional" change). */}
           {step === 1 && (
             <div className="flex flex-col gap-3">
               <div>
@@ -320,25 +325,17 @@ export default function CreateGame() {
                   Game Modes
                 </span>
                 <p className="text-xs text-sampaguita/50 mt-0.5">
-                  Multiple Choice is always included. Turn on any others to
-                  mix them into the same game.
+                  Choose which question types to include. Select at least
+                  one — mix as many together as you like.
                 </p>
               </div>
-              <ModeCard
-                icon={QUESTION_TYPE_ICONS.multiple_choice}
-                name={QUESTION_TYPE_LABELS.multiple_choice}
-                description={QUESTION_TYPE_DESCRIPTIONS.multiple_choice}
-                checked
-                locked
-                onToggle={() => {}}
-              />
-              {OPTIONAL_QUESTION_TYPE_OPTIONS.map((type) => (
+              {QUESTION_TYPE_OPTIONS.map((type) => (
                 <ModeCard
                   key={type}
                   icon={QUESTION_TYPE_ICONS[type]}
                   name={QUESTION_TYPE_LABELS[type]}
                   description={QUESTION_TYPE_DESCRIPTIONS[type]}
-                  checked={extraQuestionTypes.includes(type)}
+                  checked={enabledQuestionTypes.includes(type)}
                   onToggle={() => toggleType(type)}
                 />
               ))}

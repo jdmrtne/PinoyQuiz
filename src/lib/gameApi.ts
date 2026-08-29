@@ -59,6 +59,11 @@ export function friendlyMessage(raw: string): string {
     "You need to match every term before submitting",
     // Added 0030_question_types_phase3.sql
     "You need to place every item before submitting",
+    // Added 0037_host_pause_resume.sql
+    "This game is already paused",
+    "This game cannot be paused right now",
+    "This game is not currently paused",
+    "This game is currently paused",
   ];
   const match = known.find((m) => raw.includes(m));
   return match ? raw : "Something went wrong. Please try again.";
@@ -455,6 +460,24 @@ export async function claimHost(gameId: string): Promise<ClaimHostResult> {
  */
 export async function autoAdvanceGame(gameId: string): Promise<void> {
   await callRpc("auto_advance_game", { p_game_id: gameId });
+}
+
+/**
+ * Host-only pause/resume (0037_host_pause_resume.sql). Only valid while
+ * the game is in the QUESTION, REVEAL, or LEADERBOARD phase. Freezes
+ * whichever of those phases is current — resuming picks back up exactly
+ * where it left off, including the timer (see resume_game's comment for
+ * how the timestamp shift makes that work with no other client changes).
+ * Both calls resolve once the games row update lands, which arrives at
+ * every connected client (host included) through the existing Realtime
+ * subscription in useGameRealtime — no local state mutation needed here.
+ */
+export async function pauseGame(gameId: string): Promise<void> {
+  await callRpc("pause_game", { p_game_id: gameId });
+}
+
+export async function resumeGame(gameId: string): Promise<void> {
+  await callRpc("resume_game", { p_game_id: gameId });
 }
 
 /**
