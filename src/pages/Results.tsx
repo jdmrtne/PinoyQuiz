@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useLocation, useNavigate, Link } from "react-router-dom";
 import { Card } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -13,8 +13,10 @@ import {
   type LeaderboardEntry,
 } from "../lib/gameApi";
 
-/** Gold / silver / bronze — indexed by `rank - 1`, undefined past 3rd place. */
-const CROWN_COLORS = ["#FFD700", "#D6D9E0", "#CD7F32"];
+const MEDAL_COLORS = ["text-mango", "text-sampaguita/70", "text-sunset/80"];
+// How many top finishers get a big standing character + crown treatment
+// below the standings card (see the "podium" block further down).
+const PODIUM_SIZE = 3;
 
 /**
  * Final results — routed to automatically from GameRoom once a game
@@ -39,13 +41,6 @@ export default function Results() {
   const myPlayer = players.find((p) => p.user_id === userId) ?? null;
   const currentPlayerId = myPlayer?.id ?? navState?.playerId ?? null;
   const isHost = myPlayer?.is_host ?? navState?.isHost ?? false;
-  // Leaderboard rows only carry playerId/nickname/score (see get_leaderboard) —
-  // avatar_id lives on the roster rows from useGameRealtime instead, so we
-  // join the two here by player id to know which character each entry is.
-  const avatarByPlayerId = useMemo(
-    () => new Map(players.map((p) => [p.id, getAvatarById(p.avatar_id)])),
-    [players]
-  );
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [startingRematch, setStartingRematch] = useState(false);
@@ -164,8 +159,10 @@ export default function Results() {
           <Card className="p-3 flex flex-col gap-2">
             {entries.map((entry) => {
               const isYou = entry.playerId === currentPlayerId;
-              const crownColor = CROWN_COLORS[entry.rank - 1];
-              const avatar = avatarByPlayerId.get(entry.playerId) ?? null;
+              const medalColor = MEDAL_COLORS[entry.rank - 1];
+              const avatar = getAvatarById(
+                players.find((p) => p.id === entry.playerId)?.avatar_id
+              );
               return (
                 <div
                   key={entry.playerId}
@@ -177,32 +174,33 @@ export default function Results() {
                         : "bg-ink border-2 border-ink-3"
                   }`}
                 >
-                  <span className="relative flex-shrink-0 w-11 h-11">
-                    {crownColor && (
-                      <Crown
-                        className="absolute -top-3 left-1/2 -translate-x-1/2 w-5 h-5 z-10"
+                  {/* Player's avatar with a small crown for the top 3 (gold/
+                      silver/bronze, filled only for 1st) and a rank-number
+                      badge — replaces the old plain trophy-in-a-circle
+                      treatment now that every player has a chosen avatar
+                      (0038_player_avatars.sql) to actually show here. */}
+                  <span className="relative flex-shrink-0 w-9 h-9">
+                    {avatar ? (
+                      <img
+                        src={avatar.icon}
+                        alt=""
                         aria-hidden="true"
-                        style={{ color: crownColor, fill: crownColor }}
-                        strokeWidth={1.5}
+                        className="w-9 h-9 rounded-full object-cover border-2 border-ink-2"
+                      />
+                    ) : (
+                      <span className="flex items-center justify-center w-9 h-9 rounded-full bg-ink-2 text-mango font-display font-bold text-lg">
+                        {entry.nickname.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    {medalColor && (
+                      <Crown
+                        className={`absolute -top-2.5 left-1/2 -translate-x-1/2 w-3.5 h-3.5 -rotate-[10deg] ${medalColor}`}
+                        aria-hidden="true"
+                        fill={entry.rank === 1 ? "currentColor" : "none"}
+                        strokeWidth={2}
                       />
                     )}
-                    <span
-                      className="flex items-center justify-center w-11 h-11 rounded-full overflow-hidden bg-ink-2 border-2"
-                      style={{ borderColor: crownColor ?? "var(--color-ink-3)" }}
-                    >
-                      {avatar ? (
-                        <img
-                          src={avatar.icon}
-                          alt=""
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <span className="font-display font-bold text-mango">
-                          {entry.rank}
-                        </span>
-                      )}
-                    </span>
-                    <span className="absolute -bottom-1 -right-1 flex items-center justify-center w-5 h-5 rounded-full bg-ink-2 border border-ink-3 text-[10px] font-display font-bold text-mango">
+                    <span className="absolute -bottom-1 -right-1 flex items-center justify-center w-4.5 h-4.5 min-w-[1.125rem] rounded-full bg-ink-2 border-2 border-ink text-[10px] font-bold text-mango leading-none px-0.5">
                       {entry.rank}
                     </span>
                     <span className="sr-only">Rank {entry.rank}</span>
@@ -222,60 +220,59 @@ export default function Results() {
           </Card>
         )}
 
+        {/* Big standing-character podium — top finishers (rank order,
+            left to right), with a crown anchored right on top of the
+            winner's head. Standing pose artwork has the character's head
+            essentially touching the very top edge of its image (see
+            AvatarPoseManager/GameAvatar's source PNGs), so anchoring the
+            crown to the top of the image container — rather than floating
+            further above it — is what actually lands it on the head
+            instead of hovering beside/above it. */}
         {entries && entries.length > 0 && (
-          <div className="w-full overflow-x-auto -mx-5 px-5 pb-1">
-            <div className="flex items-end justify-center gap-5 min-w-min mx-auto">
-              {entries.map((entry) => {
-                const isYou = entry.playerId === currentPlayerId;
-                const isWinner = entry.rank === 1;
-                const crownColor = CROWN_COLORS[entry.rank - 1];
-                const avatar = avatarByPlayerId.get(entry.playerId) ?? null;
-                if (!avatar) return null;
-                return (
-                  <div
-                    key={entry.playerId}
-                    className="flex flex-col items-center gap-1.5 flex-shrink-0"
-                    style={{ width: isWinner ? 112 : 92 }}
-                  >
-                    <div
-                      className="relative flex items-end justify-center w-full"
-                      style={{ height: isWinner ? 168 : 132 }}
-                    >
-                      {crownColor && (
-                        <Crown
-                          className={
-                            isWinner
-                              ? "w-9 h-9 absolute -top-1 z-10"
-                              : "w-6 h-6 absolute top-1 z-10"
-                          }
-                          aria-hidden="true"
-                          style={{ color: crownColor, fill: crownColor }}
-                          strokeWidth={1.5}
-                        />
-                      )}
-                      <img
-                        src={avatar.poses.standing}
-                        alt={avatar.name}
-                        className="h-full w-auto object-contain"
+          <div className="flex items-end justify-center gap-6 sm:gap-10 flex-wrap">
+            {entries.slice(0, PODIUM_SIZE).map((entry) => {
+              const isYou = entry.playerId === currentPlayerId;
+              const avatar = getAvatarById(
+                players.find((p) => p.id === entry.playerId)?.avatar_id
+              );
+              if (!avatar) return null;
+              return (
+                <div
+                  key={entry.playerId}
+                  className="flex flex-col items-center gap-2"
+                >
+                  <div className="relative w-24 sm:w-28">
+                    {entry.rank === 1 && (
+                      <Crown
+                        className="absolute -top-4 sm:-top-5 left-1/2 -translate-x-1/2 w-9 h-9 sm:w-10 sm:h-10 text-mango z-10"
+                        aria-hidden="true"
+                        fill="currentColor"
+                        strokeWidth={1.5}
                         style={{
-                          filter: isWinner
-                            ? "drop-shadow(0 10px 18px rgba(255,177,0,0.45))"
-                            : "drop-shadow(0 8px 14px rgba(0,0,0,0.35))",
+                          filter: "drop-shadow(0 3px 4px rgba(0,0,0,0.35))",
                         }}
                       />
-                    </div>
-                    <span
-                      className={`text-xs font-semibold truncate max-w-full ${
-                        isYou ? "text-ube" : "text-sampaguita/80"
-                      }`}
-                    >
-                      {entry.nickname}
-                      {isYou && <span className="text-sampaguita/50"> (you)</span>}
-                    </span>
+                    )}
+                    <img
+                      src={avatar.poses.standing}
+                      alt=""
+                      aria-hidden="true"
+                      className="w-full h-auto object-contain drop-shadow-[0_10px_16px_rgba(0,0,0,0.3)]"
+                    />
                   </div>
-                );
-              })}
-            </div>
+                  <span
+                    className={`text-sm font-semibold truncate max-w-[7rem] text-center ${
+                      isYou ? "text-ube" : "text-sampaguita"
+                    }`}
+                  >
+                    {entry.nickname}
+                    {isYou && (
+                      <span className="text-sampaguita/50 font-normal"> (you)</span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
 

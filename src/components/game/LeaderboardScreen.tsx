@@ -1,5 +1,7 @@
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
+import { Crown } from "lucide-react";
+import { getAvatarById } from "../../data/avatars";
 import type { LeaderboardEntry } from "../../lib/gameApi";
 
 /**
@@ -11,6 +13,8 @@ import type { LeaderboardEntry } from "../../lib/gameApi";
  * "host controls pacing via a client-triggered function call" pattern as
  * end_question/begin_first_question.
  */
+const MEDAL_COLORS = ["text-mango", "text-sampaguita/70", "text-sunset/80"];
+
 export function LeaderboardScreen({
   entries,
   currentPlayerId,
@@ -21,6 +25,7 @@ export function LeaderboardScreen({
   advancing,
   connectedCount,
   totalCount,
+  playerAvatars,
 }: {
   entries: LeaderboardEntry[];
   currentPlayerId: string | null;
@@ -39,6 +44,10 @@ export function LeaderboardScreen({
    */
   connectedCount?: number;
   totalCount?: number;
+  /** playerId -> avatarId (0038_player_avatars.sql). Missing/unknown
+   *  entries just fall back to a plain initial circle, same as the
+   *  Results screen's standings card. */
+  playerAvatars?: Record<string, string | undefined>;
 }) {
   const showConnectionNote =
     connectedCount !== undefined && totalCount !== undefined && connectedCount < totalCount;
@@ -68,6 +77,8 @@ export function LeaderboardScreen({
         <Card className="p-3 flex flex-col gap-2">
           {entries.map((entry) => {
             const isYou = entry.playerId === currentPlayerId;
+            const medalColor = MEDAL_COLORS[entry.rank - 1];
+            const avatar = getAvatarById(playerAvatars?.[entry.playerId]);
             return (
               <div
                 key={entry.playerId}
@@ -75,8 +86,31 @@ export function LeaderboardScreen({
                   isYou ? "bg-ube/15 border-2 border-ube" : "bg-ink border-2 border-ink-3"
                 }`}
               >
-                <span className="flex items-center justify-center w-9 h-9 rounded-full font-display font-bold flex-shrink-0 bg-ink-2 text-mango">
-                  {entry.rank}
+                <span className="relative flex-shrink-0 w-9 h-9">
+                  {avatar ? (
+                    <img
+                      src={avatar.icon}
+                      alt=""
+                      aria-hidden="true"
+                      className="w-9 h-9 rounded-full object-cover border-2 border-ink-2"
+                    />
+                  ) : (
+                    <span className="flex items-center justify-center w-9 h-9 rounded-full bg-ink-2 text-mango font-display font-bold">
+                      {entry.nickname.charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                  {medalColor && (
+                    <Crown
+                      className={`absolute -top-2.5 left-1/2 -translate-x-1/2 w-3.5 h-3.5 -rotate-[10deg] ${medalColor}`}
+                      aria-hidden="true"
+                      fill={entry.rank === 1 ? "currentColor" : "none"}
+                      strokeWidth={2}
+                    />
+                  )}
+                  <span className="absolute -bottom-1 -right-1 flex items-center justify-center w-4.5 h-4.5 min-w-[1.125rem] rounded-full bg-ink-2 border-2 border-ink text-[10px] font-bold text-mango leading-none px-0.5">
+                    {entry.rank}
+                  </span>
+                  <span className="sr-only">Rank {entry.rank}</span>
                 </span>
                 <span className="flex-1 font-semibold text-sampaguita truncate">
                   {entry.nickname}
