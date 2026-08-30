@@ -238,7 +238,13 @@ export default function Results() {
         )}
 
         {entries && entries.length > 0 && (
-          <div className="w-full overflow-x-auto -mx-5 px-5 pb-1">
+          // pt-8: `overflow-x-auto` below forces the browser to treat the
+          // Y axis as `auto` too (CSS quirk — one axis "visible" next to a
+          // non-"visible" axis gets coerced to "auto"), which clips
+          // anything positioned above this box's own top edge. The crowns
+          // are deliberately offset above the characters' heads, so this
+          // padding gives them room to sit in without being cut off.
+          <div className="w-full overflow-x-auto -mx-5 px-5 pt-8 -mt-2 pb-1">
             <div className="flex items-end justify-center gap-5 min-w-min mx-auto">
               {entries.map((entry) => {
                 const isYou = entry.playerId === currentPlayerId;
