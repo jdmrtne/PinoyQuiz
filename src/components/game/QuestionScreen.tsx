@@ -65,8 +65,15 @@ export function QuestionScreen({
   return (
     <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
       <div className="w-full max-w-lg flex flex-col gap-6">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-sampaguita/60">
+        {/* "Question X / Total" is centered (not left-aligned) so it sits
+            clear of the fixed pause button (top-left) and theme toggle
+            (top-right) corners at every viewport width, instead of
+            landing directly under one of them. Absolutely centering it
+            here (rather than switching the row to justify-center) keeps
+            the timer honestly right-aligned regardless of how wide the
+            centered text is. */}
+        <div className="relative flex items-center justify-end min-h-8">
+          <span className="absolute left-1/2 -translate-x-1/2 text-sm font-semibold text-sampaguita/60">
             Question {question.order} / {question.total}
           </span>
           <span
