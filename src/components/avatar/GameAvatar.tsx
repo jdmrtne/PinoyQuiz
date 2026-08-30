@@ -42,10 +42,16 @@ export function GameAvatar({ avatarId, pose, side = "left" }: GameAvatarProps) {
         "fixed z-10 pointer-events-none select-none",
         // Mobile/tablet (below lg): small fixed badge, bottom-right,
         // regardless of `side` — there's no spare width to switch sides in.
-        "bottom-2 right-2 w-[clamp(64px,20vw,96px)]",
+        // Both width AND height are fixed here (not just width) so that
+        // landscape poses (e.g. "lying", which is wider than it is tall)
+        // get scaled up to fill the same visual footprint as the portrait
+        // poses ("standing"/"sitting") instead of shrinking to a sliver —
+        // object-contain on the <img> below then fits each pose's own
+        // aspect ratio inside this fixed box.
+        "bottom-2 right-2 w-[clamp(64px,20vw,96px)] h-[clamp(64px,20vw,96px)]",
         // lg+: back to the original full-size, edge-anchored character,
-        // free to sit on either side.
-        "lg:bottom-0 lg:w-[clamp(130px,12vw,220px)]",
+        // free to sit on either side. Same fixed width+height box.
+        "lg:bottom-0 lg:w-[clamp(130px,12vw,220px)] lg:h-[clamp(130px,12vw,220px)]",
         side === "left" && "lg:left-2 lg:right-auto xl:left-6 2xl:left-12",
         side === "right" && "xl:right-6 2xl:right-12"
       )}
@@ -60,7 +66,7 @@ export function GameAvatar({ avatarId, pose, side = "left" }: GameAvatarProps) {
         key={pose}
         src={src}
         alt=""
-        className="w-full h-auto object-contain drop-shadow-[0_12px_20px_rgba(0,0,0,0.35)]"
+        className="w-full h-full object-contain drop-shadow-[0_12px_20px_rgba(0,0,0,0.35)]"
         style={{ animation: "avatarFadeIn 0.45s ease" }}
       />
     </div>
