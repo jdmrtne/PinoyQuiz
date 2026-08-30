@@ -4,6 +4,11 @@ import { getAvatarById, type AvatarPose } from "../../data/avatars";
 interface GameAvatarProps {
   avatarId: string;
   pose: AvatarPose;
+  /** Which edge to anchor to on wide screens (`lg`+) — alternates each
+   *  round, see AvatarPoseManager/GameRoom. Ignored below `lg`: phones
+   *  and tablets don't have spare width to move the character around
+   *  in, so there it always sits tucked into the same bottom-right
+   *  corner instead. */
   side?: "left" | "right";
 }
 
@@ -13,13 +18,17 @@ interface GameAvatarProps {
  * the actual quiz layout (which stays centered with its own max-width,
  * exactly as it was before this component existed).
  *
- * Anchored to the left/right edge of the viewport, in the blank margin
- * that already exists outside the centered `max-w-lg` quiz column on
- * wide screens. Hidden below the `lg` breakpoint entirely — on tablet
- * and mobile there usually isn't enough spare width to show a
- * full-body character without crowding the question/answers/timer, so
- * per the brief it's just not shown there rather than shrunk to the
- * point of being illegible.
+ * On wide screens (`lg`+) it's anchored to the left/right edge of the
+ * viewport, in the blank margin that already exists outside the
+ * centered `max-w-lg` quiz column, and can sit on either edge (`side`)
+ * since there's room to spare. Below `lg` the quiz column runs edge to
+ * edge with no such margin, so rather than hiding the character
+ * entirely (the original v1 choice) it shrinks down into a small
+ * bottom-right corner badge — clear of the pause/theme-toggle circles
+ * already living in the top corners (see PauseButton.tsx), and small
+ * enough to stay out of the way of the actual question/answers
+ * underneath. `pointer-events-none` the whole way down means it never
+ * blocks a tap even where it visually grazes a card's edge.
  */
 export function GameAvatar({ avatarId, pose, side = "left" }: GameAvatarProps) {
   const avatar = getAvatarById(avatarId);
@@ -30,12 +39,20 @@ export function GameAvatar({ avatarId, pose, side = "left" }: GameAvatarProps) {
     <div
       aria-hidden="true"
       className={clsx(
-        "hidden lg:block fixed bottom-0 z-10 pointer-events-none select-none",
-        side === "left"
-          ? "left-2 xl:left-6 2xl:left-12"
-          : "right-2 xl:right-6 2xl:right-12"
+        "fixed z-10 pointer-events-none select-none",
+        // Mobile/tablet (below lg): small fixed badge, bottom-right,
+        // regardless of `side` — there's no spare width to switch sides in.
+        "bottom-2 right-2 w-[clamp(64px,20vw,96px)]",
+        // lg+: back to the original full-size, edge-anchored character,
+        // free to sit on either side.
+        "lg:bottom-0 lg:w-[clamp(130px,12vw,220px)]",
+        side === "left" && "lg:left-2 lg:right-auto xl:left-6 2xl:left-12",
+        side === "right" && "xl:right-6 2xl:right-12"
       )}
-      style={{ width: "clamp(130px, 12vw, 220px)" }}
+      style={{
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        paddingRight: "env(safe-area-inset-right, 0px)",
+      }}
     >
       {/* `key={pose}` forces a fresh element on pose change so the fade-in
           keyframe (defined in index.css) replays each time. */}

@@ -85,8 +85,20 @@ export default function GameRoom() {
   // game still shows someone even if this browser never opened the
   // selector (e.g. an old invite link bookmarked before this feature).
   const { avatarId: myAvatarId, setAvatarId: setMyAvatarId, defaultAvatarId } = useAvatarSelection();
+  // Which round is live (or just finished) — drives both which pose the
+  // character holds for the round (see AvatarPoseManager) and, on wide
+  // screens only, which edge it's anchored to (see GameAvatar's `side`,
+  // ignored below `lg`). Alternating strictly by parity means it always
+  // differs from the round before, same reasoning as the pose cycle.
+  const roundIndex = game?.current_question_index ?? 0;
+  const avatarSide: "left" | "right" = roundIndex % 2 === 0 ? "left" : "right";
   const avatarElement = (
-    <AvatarPoseManager avatarId={myAvatarId ?? defaultAvatarId} status={game?.status ?? null} />
+    <AvatarPoseManager
+      avatarId={myAvatarId ?? defaultAvatarId}
+      status={game?.status ?? null}
+      roundIndex={roundIndex}
+      side={avatarSide}
+    />
   );
 
   // Host pause/resume (0037_host_pause_resume.sql). `game.is_paused` lives
