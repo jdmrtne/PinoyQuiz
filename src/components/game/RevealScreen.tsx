@@ -54,10 +54,10 @@ export function RevealScreen({
       style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 4.5rem)" }}
     >
       <div className="w-full max-w-lg flex flex-col gap-6">
-        {/* Centered for the same reason as QuestionScreen's header — see
-            its comment. */}
-        <div className="relative flex items-center justify-end min-h-8">
-          <span className="absolute left-1/2 -translate-x-1/2 text-sm font-semibold text-sampaguita/60">
+        {/* Back to a simple left/right split — see QuestionScreen's
+            comment on why centering isn't needed anymore. */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold text-sampaguita/60">
             Question {question.order} / {question.total}
           </span>
           <span
