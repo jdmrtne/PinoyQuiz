@@ -139,10 +139,6 @@ export default function GameRoom() {
   const hostPlayer = players.find((p) => p.is_host) ?? null;
   const hostLooksStale = !!hostPlayer && !hostPlayer.connected && hostPlayer.id !== currentPlayerId;
   const connectedCount = players.filter((p) => p.connected).length;
-  // playerId -> avatarId lookup for LeaderboardScreen (0038_player_avatars.sql).
-  const playerAvatars = Object.fromEntries(
-    players.map((p) => [p.id, p.avatar_id])
-  );
 
   // Fetch the live question whenever the game enters QUESTION state (or the
   // current question changes — i.e. advancing to a future question in
@@ -660,7 +656,6 @@ export default function GameRoom() {
           advancing={advancing}
           connectedCount={connectedCount}
           totalCount={players.length}
-          playerAvatars={playerAvatars}
         />
       </>
     );
