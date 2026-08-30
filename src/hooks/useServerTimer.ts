@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { computeRemainingSeconds } from "../game-engine/timeRemaining";
+import { calibrateServerClock, getServerNow } from "../lib/serverClock";
 
 /**
  * Computes remaining seconds from a server-set start timestamp, not from
@@ -36,13 +37,25 @@ export function useServerTimer(
   // GameRoom immediately after the first question appeared.
   const [, forceRerender] = useState(0);
 
+  // Kick off (or reuse) clock calibration — see serverClock.ts. Cheap and
+  // idempotent, so just doing it on every mount is fine.
+  useEffect(() => {
+    calibrateServerClock().then(() => forceRerender((n) => n + 1));
+  }, []);
+
   useEffect(() => {
     if (!startedAtIso || pausedAtIso) return;
     const interval = setInterval(() => forceRerender((n) => n + 1), 250);
     return () => clearInterval(interval);
   }, [startedAtIso, pausedAtIso]);
 
+  // Paused: freeze using the server's own paused_at timestamp — no device
+  // clock involved, so this is exact regardless of any client/server
+  // clock drift. Running: compare against getServerNow() (device clock
+  // corrected by the calibrated offset) instead of the raw device clock,
+  // so resuming doesn't expose that drift as a sudden jump — see
+  // serverClock.ts for why that jump happens otherwise.
   return pausedAtIso
     ? computeRemainingSeconds(startedAtIso, durationSeconds, new Date(pausedAtIso).getTime())
-    : computeRemainingSeconds(startedAtIso, durationSeconds);
+    : computeRemainingSeconds(startedAtIso, durationSeconds, getServerNow());
 }
