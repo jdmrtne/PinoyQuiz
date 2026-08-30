@@ -31,7 +31,23 @@ interface UseGameRealtimeResult {
  * supabase-js v2 API exactly; what's actually new/untested-by-me here is
  * the live wire behavior, not the SQL or the RLS model underneath it
  * (both of which *were* validated — see docs/ARCHITECTURE.md).
+ *
+ * Self-healing fallback for the `games` row specifically: a websocket push
+ * can simply be missed — most commonly on mobile, where backgrounding the
+ * browser tab/app (locking the screen, switching apps) suspends the
+ * socket, so any change broadcast during that window never arrives, and
+ * without this fallback the UI is stuck showing stale state (e.g. a
+ * pause/resume the host triggered) until something forces a fresh fetch —
+ * which is exactly why reloading "fixes" it. To make that automatic
+ * instead of manual: (1) re-fetch the `games` row on a short poll as a
+ * safety net, and (2) re-fetch it immediately whenever the tab/app regains
+ * focus or comes back online, which is precisely the moment a missed
+ * background event needs to be caught up on. `players` isn't included
+ * here since it's not what host pause/resume (or the question timer)
+ * depends on.
  */
+const GAME_POLL_INTERVAL_MS = 4000;
+
 export function useGameRealtime(
   roomCode: string | undefined
 ): UseGameRealtimeResult {
@@ -44,6 +60,24 @@ export function useGameRealtime(
     const code = roomCode;
     let cancelled = false;
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let gameId: string | null = null;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+    async function refetchGame() {
+      if (!gameId || cancelled) return;
+      const { data, error } = await supabase
+        .from("games")
+        .select("*")
+        .eq("id", gameId)
+        .single();
+      if (!error && data && !cancelled) {
+        setGame(data as GameRow);
+      }
+    }
+
+    function handleVisible() {
+      if (document.visibilityState === "visible") refetchGame();
+    }
 
     async function init() {
       try {
@@ -70,6 +104,7 @@ export function useGameRealtime(
         if (playersError) throw new Error(playersError.message);
         if (cancelled) return;
 
+        gameId = gameRow.id;
         setGame(gameRow);
         setPlayers(playerRows ?? []);
         setState({ status: "ready" });
@@ -103,6 +138,13 @@ export function useGameRealtime(
             }
           )
           .subscribe();
+
+        // Safety net alongside the subscription above — see comment block
+        // on the hook for why this is needed.
+        pollInterval = setInterval(refetchGame, GAME_POLL_INTERVAL_MS);
+        document.addEventListener("visibilitychange", handleVisible);
+        window.addEventListener("focus", refetchGame);
+        window.addEventListener("online", refetchGame);
       } catch (err) {
         if (cancelled) return;
         setState({
@@ -117,6 +159,10 @@ export function useGameRealtime(
     return () => {
       cancelled = true;
       if (channel) supabase.removeChannel(channel);
+      if (pollInterval) clearInterval(pollInterval);
+      document.removeEventListener("visibilitychange", handleVisible);
+      window.removeEventListener("focus", refetchGame);
+      window.removeEventListener("online", refetchGame);
     };
   }, [roomCode]);
 
