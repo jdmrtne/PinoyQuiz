@@ -13,10 +13,24 @@ import {
   type LeaderboardEntry,
 } from "../lib/gameApi";
 
-const MEDAL_COLORS = ["text-mango", "text-sampaguita/70", "text-sunset/80"];
+// Actual gold/silver/bronze hex values for the small leaderboard-row crowns
+// — using literal colors here (rather than a theme class like
+// text-sampaguita, which is also used for two other unrelated things and
+// can end up near-invisible against the card background depending on
+// light/dark theme) so 2nd and 3rd place read clearly as silver/bronze
+// instead of disappearing into the background.
+const MEDAL_HEX = ["#FFB100", "#C0C0C0", "#CD7F32"];
 // How many top finishers get a big standing character + crown treatment
 // below the standings card (see the "podium" block further down).
 const PODIUM_SIZE = 3;
+// Winner stands out with a visibly larger character than the rest of the
+// podium, same idea as a physical 1st/2nd/3rd podium having different
+// step heights.
+const PODIUM_WIDTH: Record<number, string> = {
+  1: "w-32 sm:w-40",
+  2: "w-24 sm:w-28",
+  3: "w-24 sm:w-28",
+};
 
 /**
  * Final results — routed to automatically from GameRoom once a game
@@ -159,7 +173,7 @@ export default function Results() {
           <Card className="p-3 flex flex-col gap-2">
             {entries.map((entry) => {
               const isYou = entry.playerId === currentPlayerId;
-              const medalColor = MEDAL_COLORS[entry.rank - 1];
+              const medalHex = MEDAL_HEX[entry.rank - 1];
               const avatar = getAvatarById(
                 players.find((p) => p.id === entry.playerId)?.avatar_id
               );
@@ -174,11 +188,13 @@ export default function Results() {
                         : "bg-ink border-2 border-ink-3"
                   }`}
                 >
-                  {/* Player's avatar with a small crown for the top 3 (gold/
-                      silver/bronze, filled only for 1st) and a rank-number
-                      badge — replaces the old plain trophy-in-a-circle
-                      treatment now that every player has a chosen avatar
-                      (0038_player_avatars.sql) to actually show here. */}
+                  {/* Player's avatar with a small crown for the top 3
+                      (gold/silver/bronze, always filled so 2nd/3rd read
+                      clearly instead of fading into the background — see
+                      MEDAL_HEX) and a rank-number badge — replaces the old
+                      plain trophy-in-a-circle treatment now that every
+                      player has a chosen avatar (0038_player_avatars.sql)
+                      to actually show here. */}
                   <span className="relative flex-shrink-0 w-9 h-9">
                     {avatar ? (
                       <img
@@ -192,12 +208,14 @@ export default function Results() {
                         {entry.nickname.charAt(0).toUpperCase()}
                       </span>
                     )}
-                    {medalColor && (
+                    {medalHex && (
                       <Crown
-                        className={`absolute -top-2.5 left-1/2 -translate-x-1/2 w-3.5 h-3.5 -rotate-[10deg] ${medalColor}`}
+                        className="absolute -top-2.5 left-1/2 -translate-x-1/2 w-4 h-4 -rotate-[10deg]"
                         aria-hidden="true"
-                        fill={entry.rank === 1 ? "currentColor" : "none"}
-                        strokeWidth={2}
+                        fill={medalHex}
+                        stroke={medalHex}
+                        strokeWidth={1}
+                        style={{ filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.35))" }}
                       />
                     )}
                     <span className="absolute -bottom-1 -right-1 flex items-center justify-center w-4.5 h-4.5 min-w-[1.125rem] rounded-full bg-ink-2 border-2 border-ink text-[10px] font-bold text-mango leading-none px-0.5">
@@ -241,10 +259,10 @@ export default function Results() {
                   key={entry.playerId}
                   className="flex flex-col items-center gap-2"
                 >
-                  <div className="relative w-24 sm:w-28">
+                  <div className={`relative ${PODIUM_WIDTH[entry.rank] ?? PODIUM_WIDTH[3]}`}>
                     {entry.rank === 1 && (
                       <Crown
-                        className="absolute -top-4 sm:-top-5 left-1/2 -translate-x-1/2 w-9 h-9 sm:w-10 sm:h-10 text-mango z-10"
+                        className="absolute -top-5 sm:-top-6 left-1/2 -translate-x-1/2 w-11 h-11 sm:w-12 sm:h-12 text-mango z-10"
                         aria-hidden="true"
                         fill="currentColor"
                         strokeWidth={1.5}
@@ -261,9 +279,9 @@ export default function Results() {
                     />
                   </div>
                   <span
-                    className={`text-sm font-semibold truncate max-w-[7rem] text-center ${
-                      isYou ? "text-ube" : "text-sampaguita"
-                    }`}
+                    className={`font-semibold truncate max-w-[8rem] text-center ${
+                      entry.rank === 1 ? "text-base" : "text-sm"
+                    } ${isYou ? "text-ube" : "text-sampaguita"}`}
                   >
                     {entry.nickname}
                     {isYou && (

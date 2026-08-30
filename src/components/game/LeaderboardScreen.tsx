@@ -13,7 +13,10 @@ import type { LeaderboardEntry } from "../../lib/gameApi";
  * "host controls pacing via a client-triggered function call" pattern as
  * end_question/begin_first_question.
  */
-const MEDAL_COLORS = ["text-mango", "text-sampaguita/70", "text-sunset/80"];
+// See Results.tsx for why these are literal hex values rather than a
+// theme class — 2nd/3rd place need to actually read as silver/bronze
+// regardless of light/dark theme, not fade into the card.
+const MEDAL_HEX = ["#FFB100", "#C0C0C0", "#CD7F32"];
 
 export function LeaderboardScreen({
   entries,
@@ -77,7 +80,7 @@ export function LeaderboardScreen({
         <Card className="p-3 flex flex-col gap-2">
           {entries.map((entry) => {
             const isYou = entry.playerId === currentPlayerId;
-            const medalColor = MEDAL_COLORS[entry.rank - 1];
+            const medalHex = MEDAL_HEX[entry.rank - 1];
             const avatar = getAvatarById(playerAvatars?.[entry.playerId]);
             return (
               <div
@@ -99,12 +102,14 @@ export function LeaderboardScreen({
                       {entry.nickname.charAt(0).toUpperCase()}
                     </span>
                   )}
-                  {medalColor && (
+                  {medalHex && (
                     <Crown
-                      className={`absolute -top-2.5 left-1/2 -translate-x-1/2 w-3.5 h-3.5 -rotate-[10deg] ${medalColor}`}
+                      className="absolute -top-2.5 left-1/2 -translate-x-1/2 w-4 h-4 -rotate-[10deg]"
                       aria-hidden="true"
-                      fill={entry.rank === 1 ? "currentColor" : "none"}
-                      strokeWidth={2}
+                      fill={medalHex}
+                      stroke={medalHex}
+                      strokeWidth={1}
+                      style={{ filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.35))" }}
                     />
                   )}
                   <span className="absolute -bottom-1 -right-1 flex items-center justify-center w-4.5 h-4.5 min-w-[1.125rem] rounded-full bg-ink-2 border-2 border-ink text-[10px] font-bold text-mango leading-none px-0.5">
