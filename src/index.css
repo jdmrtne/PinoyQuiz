@@ -177,6 +177,19 @@
   }
 }
 
+/* Avatar system — pose crossfade (see GameAvatar.tsx). Purely cosmetic,
+   additive to the palette/layout above. */
+@keyframes avatarFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;

@@ -64,6 +64,9 @@ export function friendlyMessage(raw: string): string {
     "This game cannot be paused right now",
     "This game is not currently paused",
     "This game is currently paused",
+    // Added 0038_player_avatars.sql
+    "That is not a valid avatar",
+    "You can only change your character in the lobby",
   ];
   const match = known.find((m) => raw.includes(m));
   return match ? raw : "Something went wrong. Please try again.";
@@ -126,6 +129,11 @@ export interface CreateGameParams {
    * preview shown on Create Game before this is sent.
    */
   timingStrategy?: TimingStrategyRow;
+  /**
+   * Player avatar system (0038 migration). Format "avatar-NN" — see
+   * src/data/avatars.ts. Defaults to "avatar-01" server-side if omitted.
+   */
+  avatarId?: string;
 }
 
 export interface CreateGameResult {
@@ -149,6 +157,7 @@ export async function createGame(
     p_include_new_question_types: params.includeNewQuestionTypes,
     p_enabled_question_types: params.enabledQuestionTypes,
     p_timing_strategy: params.timingStrategy,
+    p_avatar_id: params.avatarId,
   });
   return {
     gameId: row.out_game_id,
@@ -503,11 +512,13 @@ export interface JoinGameResult {
 
 export async function joinGame(
   roomCode: string,
-  nickname: string
+  nickname: string,
+  avatarId?: string
 ): Promise<JoinGameResult> {
   const row = await callRpc("join_game", {
     p_room_code: roomCode,
     p_nickname: nickname,
+    p_avatar_id: avatarId,
   });
   return {
     gameId: row.out_game_id,
@@ -516,4 +527,19 @@ export async function joinGame(
     isHost: row.out_is_host,
     reconnected: row.out_reconnected,
   };
+}
+
+/**
+ * Change your character while still in the lobby (0038 migration) — no
+ * need to leave/rejoin. Server-side no-ops this once the game has left
+ * WAITING; the roster will just keep showing whatever was set last.
+ */
+export async function setPlayerAvatar(
+  playerId: string,
+  avatarId: string
+): Promise<void> {
+  await callRpc("set_player_avatar", {
+    p_player_id: playerId,
+    p_avatar_id: avatarId,
+  });
 }

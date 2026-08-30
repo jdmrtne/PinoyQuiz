@@ -11,14 +11,18 @@ import { LeaderboardScreen } from "../components/game/LeaderboardScreen";
 import { HostDisconnectedBanner } from "../components/game/HostDisconnectedBanner";
 import { PauseOverlay } from "../components/game/PauseOverlay";
 import { PauseButton } from "../components/game/PauseButton";
+import { AvatarPoseManager } from "../components/avatar/AvatarPoseManager";
+import { AvatarSelector } from "../components/avatar/AvatarSelector";
 import { categoryDisplayLabel, DIFFICULTY_LABELS, GAME_MODE_LABELS, ANSWER_BEHAVIOR_LABELS } from "../data/gameOptions";
 import { useGameRealtime } from "../hooks/useGameRealtime";
 import { useServerTimer } from "../hooks/useServerTimer";
 import { useCurrentUserId } from "../hooks/useCurrentUserId";
 import { useHeartbeat } from "../hooks/useHeartbeat";
 import { useAutoAdvance } from "../hooks/useAutoAdvance";
+import { useAvatarSelection } from "../hooks/useAvatarSelection";
 import {
   removePlayer,
+  setPlayerAvatar,
   startGame,
   beginFirstQuestion,
   getCurrentQuestion,
@@ -75,6 +79,15 @@ export default function GameRoom() {
   const myPlayer = players.find((p) => p.user_id === userId) ?? null;
   const isHost = myPlayer?.is_host ?? navState?.isHost ?? false;
   const currentPlayerId = myPlayer?.id ?? navState?.playerId ?? null;
+
+  // Avatar system — purely cosmetic, client-side (see useAvatarSelection).
+  // `myAvatarId` falls back to the default character so returning to a
+  // game still shows someone even if this browser never opened the
+  // selector (e.g. an old invite link bookmarked before this feature).
+  const { avatarId: myAvatarId, setAvatarId: setMyAvatarId, defaultAvatarId } = useAvatarSelection();
+  const avatarElement = (
+    <AvatarPoseManager avatarId={myAvatarId ?? defaultAvatarId} status={game?.status ?? null} />
+  );
 
   // Host pause/resume (0037_host_pause_resume.sql). `game.is_paused` lives
   // on the same row every client already subscribes to (useGameRealtime),
@@ -368,6 +381,21 @@ export default function GameRoom() {
     }
   }
 
+  // Lobby-only: change character without leaving/rejoining the room.
+  // Updates localStorage + local state immediately (so the picker feels
+  // instant) and best-effort syncs it to the players row everyone else's
+  // roster reads from; a failure here just means the roster shows the old
+  // pick a beat longer; it's not worth blocking on or retrying.
+  async function handleChangeAvatar(newAvatarId: string) {
+    setMyAvatarId(newAvatarId);
+    if (!currentPlayerId) return;
+    try {
+      await setPlayerAvatar(currentPlayerId, newAvatarId);
+    } catch {
+      // Cosmetic only — silently ignore. Their own screen still updated.
+    }
+  }
+
   async function handleContinueToLeaderboard() {
     if (isAutomatic) return;
     if (!game || !isHost) return;
@@ -493,6 +521,7 @@ export default function GameRoom() {
   if (game.status === "COUNTDOWN") {
     return (
       <>
+        {avatarElement}
         {disconnectBanner}
         <CountdownOverlay onComplete={handleCountdownComplete} />
       </>
@@ -513,6 +542,7 @@ export default function GameRoom() {
     if (isPaused) {
       return (
         <>
+          {avatarElement}
           {disconnectBanner}
           <PauseOverlay isHost={isHost} onResume={handleResume} resuming={resuming} />
         </>
@@ -527,6 +557,7 @@ export default function GameRoom() {
     }
     return (
       <>
+        {avatarElement}
         {disconnectBanner}
         {pauseControl}
         <QuestionScreen
@@ -550,6 +581,7 @@ export default function GameRoom() {
     if (isPaused) {
       return (
         <>
+          {avatarElement}
           {disconnectBanner}
           <PauseOverlay isHost={isHost} onResume={handleResume} resuming={resuming} />
         </>
@@ -564,6 +596,7 @@ export default function GameRoom() {
     }
     return (
       <>
+        {avatarElement}
         {disconnectBanner}
         {pauseControl}
         <RevealScreen
@@ -582,6 +615,7 @@ export default function GameRoom() {
     if (isPaused) {
       return (
         <>
+          {avatarElement}
           {disconnectBanner}
           <PauseOverlay isHost={isHost} onResume={handleResume} resuming={resuming} />
         </>
@@ -597,6 +631,7 @@ export default function GameRoom() {
     const isLastQuestion = game.current_question_index + 1 >= game.question_count;
     return (
       <>
+        {avatarElement}
         {disconnectBanner}
         {pauseControl}
         <LeaderboardScreen
@@ -620,10 +655,12 @@ export default function GameRoom() {
     nickname: p.nickname,
     isHost: p.is_host,
     connected: p.connected,
+    avatarId: p.avatar_id,
   }));
 
   return (
     <div className="min-h-dvh px-5 py-10 flex flex-col items-center">
+      {avatarElement}
       <div className="w-full max-w-lg flex flex-col gap-5">
         {disconnectBanner}
         <div>
@@ -638,6 +675,13 @@ export default function GameRoom() {
         </div>
 
         <InviteBox roomCode={roomCode!} />
+
+        <Card className="p-6">
+          <AvatarSelector
+            value={myAvatarId ?? defaultAvatarId}
+            onChange={handleChangeAvatar}
+          />
+        </Card>
 
         <PlayerRoster
           players={rosterPlayers}

@@ -6,6 +6,8 @@ import { Card } from "../components/ui/Card";
 import { TextField } from "../components/ui/TextField";
 import { joinGame, lookupGame, GameApiError, type RoomLookup } from "../lib/gameApi";
 import { categoryDisplayLabel, DIFFICULTY_LABELS } from "../data/gameOptions";
+import { AvatarSelector } from "../components/avatar/AvatarSelector";
+import { useAvatarSelection } from "../hooks/useAvatarSelection";
 
 type LookupState =
   | { status: "idle" }
@@ -21,6 +23,7 @@ export default function JoinGame() {
   const [lookup, setLookup] = useState<LookupState>({ status: "idle" });
   const [joinError, setJoinError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { avatarId, setAvatarId, defaultAvatarId } = useAvatarSelection();
 
   // Pre-filled from an invite link (/join/:roomCode) — validate it right
   // away so a broken link tells the person immediately, before they type a
@@ -66,7 +69,7 @@ export default function JoinGame() {
 
     setSubmitting(true);
     try {
-      const result = await joinGame(code, nickname.trim());
+      const result = await joinGame(code, nickname.trim(), avatarId ?? defaultAvatarId);
       navigate(`/game/${code}`, {
         state: { playerId: result.playerId, isHost: result.isHost },
       });
@@ -138,6 +141,8 @@ export default function JoinGame() {
               onChange={(e) => setNickname(e.target.value)}
               autoFocus={!!roomCodeFromUrl}
             />
+
+            <AvatarSelector value={avatarId ?? defaultAvatarId} onChange={setAvatarId} />
 
             {joinError && (
               <p role="alert" className="text-sm text-sunset -mt-2">

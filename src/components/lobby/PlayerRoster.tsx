@@ -1,12 +1,15 @@
 import { Card } from "../ui/Card";
 import clsx from "clsx";
 import { Crown, X } from "lucide-react";
+import { getAvatarById } from "../../data/avatars";
 
 export interface RosterPlayer {
   id: string;
   nickname: string;
   isHost: boolean;
   connected: boolean;
+  /** Added 0038_player_avatars.sql. Omit to render the pill without an icon. */
+  avatarId?: string;
 }
 
 export function PlayerRoster({
@@ -28,42 +31,53 @@ export function PlayerRoster({
         <p className="text-sm text-sampaguita/50">Waiting for players to join…</p>
       ) : (
         <ul className="flex flex-wrap gap-2.5">
-          {players.map((p) => (
-            <li
-              key={p.id}
-              className={clsx(
-                "px-4 py-2 rounded-full text-sm font-semibold border-2 flex items-center gap-1.5",
-                p.id === currentPlayerId
-                  ? "bg-ube/20 border-ube text-sampaguita"
-                  : "bg-ink border-ink-3 text-sampaguita/80",
-                !p.connected && "opacity-40"
-              )}
-            >
-              {p.isHost && (
-                <Crown
-                  className="w-4 h-4 text-mango flex-shrink-0"
-                  aria-hidden="true"
-                  fill="currentColor"
-                  strokeWidth={1.5}
-                />
-              )}
-              {p.nickname}
-              {p.id === currentPlayerId && (
-                <span className="text-sampaguita/50">(you)</span>
-              )}
-              {!p.connected && <span className="sr-only">(disconnected)</span>}
-              {onRemove && !p.isHost && (
-                <button
-                  type="button"
-                  onClick={() => onRemove(p.id)}
-                  aria-label={`Remove ${p.nickname} from the room`}
-                  className="ml-0.5 -mr-1.5 -my-2 rounded-full w-8 h-8 flex items-center justify-center text-sampaguita/50 hover:text-sunset hover:bg-sunset/10 transition-colors touch-manipulation"
-                >
-                  <X className="w-4 h-4" aria-hidden="true" />
-                </button>
-              )}
-            </li>
-          ))}
+          {players.map((p) => {
+            const avatar = getAvatarById(p.avatarId);
+            return (
+              <li
+                key={p.id}
+                className={clsx(
+                  "pl-2 pr-4 py-2 rounded-full text-sm font-semibold border-2 flex items-center gap-1.5",
+                  p.id === currentPlayerId
+                    ? "bg-ube/20 border-ube text-sampaguita"
+                    : "bg-ink border-ink-3 text-sampaguita/80",
+                  !p.connected && "opacity-40"
+                )}
+              >
+                {avatar && (
+                  <img
+                    src={avatar.icon}
+                    alt=""
+                    aria-hidden="true"
+                    className="w-6 h-6 rounded-full object-cover flex-shrink-0 -ml-0.5"
+                  />
+                )}
+                {p.isHost && (
+                  <Crown
+                    className="w-4 h-4 text-mango flex-shrink-0"
+                    aria-hidden="true"
+                    fill="currentColor"
+                    strokeWidth={1.5}
+                  />
+                )}
+                {p.nickname}
+                {p.id === currentPlayerId && (
+                  <span className="text-sampaguita/50">(you)</span>
+                )}
+                {!p.connected && <span className="sr-only">(disconnected)</span>}
+                {onRemove && !p.isHost && (
+                  <button
+                    type="button"
+                    onClick={() => onRemove(p.id)}
+                    aria-label={`Remove ${p.nickname} from the room`}
+                    className="ml-0.5 -mr-1.5 -my-2 rounded-full w-8 h-8 flex items-center justify-center text-sampaguita/50 hover:text-sunset hover:bg-sunset/10 transition-colors touch-manipulation"
+                  >
+                    <X className="w-4 h-4" aria-hidden="true" />
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </Card>

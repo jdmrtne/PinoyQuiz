@@ -163,6 +163,8 @@ export interface Database {
           connected: boolean;
           joined_at: string;
           last_seen_at: string;
+          /** Added 0038_player_avatars.sql. Format "avatar-NN" — see src/data/avatars.ts for the catalog. */
+          avatar_id: string;
         };
         Insert: Partial<Database["public"]["Tables"]["players"]["Row"]>;
         Update: Partial<Database["public"]["Tables"]["players"]["Row"]>;
@@ -270,6 +272,8 @@ export interface Database {
           player_id: string;
           game_id: string;
           nickname: string;
+          /** Added 0038_player_avatars.sql. */
+          avatar_id: string;
           score: number;
           is_host: boolean;
           connected: boolean;
@@ -296,6 +300,8 @@ export interface Database {
           p_enabled_question_types?: QuestionTypeRow[] | null;
           /** Added 0036_smart_timing.sql. Defaults to "fixed" server-side. */
           p_timing_strategy?: TimingStrategyRow;
+          /** Added 0038_player_avatars.sql. Defaults to "avatar-01" server-side. */
+          p_avatar_id?: string;
         };
         Returns: {
           out_game_id: string;
@@ -317,7 +323,12 @@ export interface Database {
         }[];
       };
       join_game: {
-        Args: { p_room_code: string; p_nickname: string };
+        Args: {
+          p_room_code: string;
+          p_nickname: string;
+          /** Added 0038_player_avatars.sql. Defaults to "avatar-01" server-side. */
+          p_avatar_id?: string;
+        };
         Returns: {
           out_game_id: string;
           out_player_id: string;
@@ -325,6 +336,11 @@ export interface Database {
           out_is_host: boolean;
           out_reconnected: boolean;
         }[];
+      };
+      /** Added 0038_player_avatars.sql — change character while still in the lobby. */
+      set_player_avatar: {
+        Args: { p_player_id: string; p_avatar_id: string };
+        Returns: undefined;
       };
       remove_player: {
         Args: { p_player_id: string };

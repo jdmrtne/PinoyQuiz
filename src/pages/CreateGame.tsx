@@ -33,6 +33,8 @@ import {
 } from "../data/gameOptions";
 import { TYPICAL_SECONDS, averageTypicalSeconds } from "../game-engine/questionTiming";
 import { createGame, GameApiError } from "../lib/gameApi";
+import { AvatarSelector } from "../components/avatar/AvatarSelector";
+import { useAvatarSelection } from "../hooks/useAvatarSelection";
 import type {
   GameCategorySetting,
   GameDifficultySetting,
@@ -68,6 +70,7 @@ export default function CreateGame() {
   const [step, setStep] = useState(0);
 
   const [nickname, setNickname] = useState("");
+  const { avatarId, setAvatarId, defaultAvatarId } = useAvatarSelection();
   const [category, setCategory] = useState<GameCategorySetting>("random");
   // Custom Mix (0022): host picks a specific set of categories instead of
   // one fixed category (or "random" across all of them). The two modes are
@@ -198,6 +201,7 @@ export default function CreateGame() {
         // in or out. validateStep(1) above guarantees this is non-empty.
         enabledQuestionTypes: enabledTypes,
         timingStrategy,
+        avatarId: avatarId ?? defaultAvatarId,
       });
       navigate(`/game/${result.roomCode}`, {
         state: { playerId: result.playerId, isHost: true },
@@ -248,6 +252,8 @@ export default function CreateGame() {
                 onChange={(e) => setNickname(e.target.value)}
                 autoFocus
               />
+
+              <AvatarSelector value={avatarId ?? defaultAvatarId} onChange={setAvatarId} />
 
               <div className="flex flex-col gap-4">
                 <span className="text-sm font-semibold text-sampaguita/80">
