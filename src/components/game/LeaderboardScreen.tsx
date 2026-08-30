@@ -44,7 +44,14 @@ export function LeaderboardScreen({
     connectedCount !== undefined && totalCount !== undefined && connectedCount < totalCount;
 
   return (
-    <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
+    // Same top-clearance fix as QuestionScreen/RevealScreen — see their
+    // comments — so this screen's content also clears the fixed
+    // pause/theme-toggle buttons, even though "Leaderboard" itself is
+    // centered and less likely to sit directly under either.
+    <div
+      className="min-h-dvh px-5 pb-8 flex flex-col items-center"
+      style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 4.5rem)" }}
+    >
       <div className="w-full max-w-lg flex flex-col gap-6">
         <div className="text-center">
           <h1 className="text-3xl font-bold mb-1">Leaderboard</h1>

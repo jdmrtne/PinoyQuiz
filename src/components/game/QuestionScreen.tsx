@@ -63,7 +63,16 @@ export function QuestionScreen({
         : answeredIndex !== null;
 
   return (
-    <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
+    // Extra top clearance (beyond the plain py-8 used elsewhere) so this
+    // row — specifically the timer, right-aligned near the edge — clears
+    // the fixed pause button/theme toggle circles in the top corners
+    // instead of rendering underneath them, matching how far down those
+    // buttons themselves sit (safe-area-inset-top + 0.75rem top offset +
+    // their own 2.75rem height), plus a small gap.
+    <div
+      className="min-h-dvh px-5 pb-8 flex flex-col items-center"
+      style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 4.5rem)" }}
+    >
       <div className="w-full max-w-lg flex flex-col gap-6">
         {/* "Question X / Total" is centered (not left-aligned) so it sits
             clear of the fixed pause button (top-left) and theme toggle

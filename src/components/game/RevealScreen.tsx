@@ -46,7 +46,13 @@ export function RevealScreen({
         : reveal.yourAnswerIndex === null;
 
   return (
-    <div className="min-h-dvh px-5 py-8 flex flex-col items-center">
+    // Same top-clearance fix as QuestionScreen — see its comment — so the
+    // Correct/Incorrect label here doesn't render under the fixed
+    // pause/theme-toggle buttons either.
+    <div
+      className="min-h-dvh px-5 pb-8 flex flex-col items-center"
+      style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 4.5rem)" }}
+    >
       <div className="w-full max-w-lg flex flex-col gap-6">
         {/* Centered for the same reason as QuestionScreen's header — see
             its comment. */}
