@@ -260,12 +260,12 @@ export default function Results() {
                         <Crown
                           className={
                             isWinner
-                              ? "w-9 h-9 absolute -top-1 z-10"
-                              : "w-6 h-6 absolute top-1 z-10"
+                              ? "w-9 h-9 absolute -top-7 z-10"
+                              : "w-6 h-6 absolute -top-4 z-10"
                           }
                           aria-hidden="true"
                           style={crownStyle(crownColor)}
-                          strokeWidth={2}
+                          strokeWidth={1.25}
                         />
                       )}
                       <img
