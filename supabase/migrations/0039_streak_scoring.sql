@@ -905,6 +905,14 @@ $$;
 -- "score + streak bonus" instead of just a lump-sum delta.
 -- ---------------------------------------------------------------------
 
+-- get_leaderboard's OUT parameter list is changing (adding
+-- out_streak_bonus), and Postgres refuses to CREATE OR REPLACE a function
+-- whose return row type differs from what's already registered — it has
+-- to be dropped first. Safe here: the function body is fully redefined
+-- immediately below, and the grant is re-applied after (a drop revokes
+-- any existing grants along with the function itself).
+drop function if exists get_leaderboard(uuid);
+
 create or replace function get_leaderboard(p_game_id uuid)
 returns table (
   out_player_id uuid,
@@ -961,11 +969,23 @@ begin
 end;
 $$;
 
+-- DROP FUNCTION above wipes any grants the old function had, and a fresh
+-- CREATE FUNCTION defaults to granting PUBLIC execute again — revoke
+-- that and re-grant to authenticated only, matching
+-- 0012_leaderboard.sql's original (stricter) grant.
+revoke execute on function get_leaderboard(uuid) from public;
+grant execute on function get_leaderboard(uuid) to authenticated;
+
 -- ---------------------------------------------------------------------
 -- get_answer_reveal — same body as 0030's, plus out_streak_bonus so the
 -- REVEAL screen can show the same "score + streak bonus" breakdown a
 -- question earlier than the leaderboard does.
 -- ---------------------------------------------------------------------
+
+-- Same issue as get_leaderboard above — out_streak_bonus is a new OUT
+-- parameter, so the existing registered function has to be dropped
+-- before it can be redefined with the new return row type.
+drop function if exists get_answer_reveal(uuid);
 
 create or replace function get_answer_reveal(p_game_id uuid)
 returns table (
@@ -1094,6 +1114,12 @@ begin
   end if;
 end;
 $$;
+
+-- Same reasoning as get_leaderboard above — revoke the default PUBLIC
+-- execute grant a fresh CREATE FUNCTION gets, matching
+-- 0011_answer_submission.sql's original (stricter) grant.
+revoke execute on function get_answer_reveal(uuid) from public;
+grant execute on function get_answer_reveal(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------
 -- play_again — same body as 0016's, plus zeroing current_streak
