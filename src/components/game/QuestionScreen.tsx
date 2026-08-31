@@ -359,14 +359,12 @@ function TextAnswerForm({
 }
 
 /** A single scrambled letter, carrying its own id so two tiles with the
- * same letter (e.g. the two "A"s in MANILA) still drag/drop and reorder
- * independently instead of being indistinguishable by value alone. */
+ * same letter (e.g. the two "A"s in MANILA) are still distinguishable —
+ * placement is tracked by id, not by letter value. */
 interface LetterTile {
   id: string;
   letter: string;
 }
-
-type ScrambleZone = "pool" | "answer";
 
 function shuffleTiles(letters: string[]): LetterTile[] {
   const tiles = letters.map((letter, i) => ({
@@ -384,34 +382,49 @@ function shuffleTiles(letters: string[]): LetterTile[] {
 }
 
 /** Pointer (mouse + touch + pen, unified) drag state for the tile
- * currently being dragged, if any. */
+ * currently being dragged/tapped, if any. `moved` flips true once the
+ * pointer has travelled past DRAG_THRESHOLD — until then this is treated
+ * as a tap, not a drag, on release (see finishGesture). */
 interface DragState {
   id: string;
-  letter: string;
-  fromZone: ScrambleZone;
+  fromSlot: number | null; // null = the tile started in the pool
   pointerId: number;
+  startX: number;
+  startY: number;
   x: number;
   y: number;
   offsetX: number;
   offsetY: number;
   width: number;
   height: number;
+  moved: boolean;
 }
 
+const DRAG_THRESHOLD_PX = 6;
+
 /**
- * Unscramble, drag & drop: the scrambled word starts as loose letter
- * tiles in the pool below; the player drags tiles up into the answer
- * strip to spell out a word, in any order, and can drag tiles back out
- * or reorder them within the strip before submitting. Submission still
- * goes through the exact same onAnswerText -> submitTextAnswer path (and
- * therefore the exact same server-side grading) as identification/
- * fill_blank — this component only changes how the text gets assembled.
+ * Unscramble, one slot per letter: the answer strip shows exactly as many
+ * boxes as the word has letters, each either empty or holding one tile.
+ * Two ways to place/remove a tile, both driven by the same underlying
+ * pointer gesture so they never conflict with each other:
+ *   - Tap a pool letter -> it fills the next empty slot, left to right.
+ *     Tap a placed letter -> it's removed, back to the pool.
+ *   - Or press-and-drag a letter (past a small movement threshold) onto
+ *     a specific slot to place it there, or onto/off the pool to remove
+ *     it — same as before, plus slot-to-slot dragging swaps two placed
+ *     letters directly.
+ * A short pointerdown-to-pointerup with little movement is read as a tap
+ * (DRAG_THRESHOLD_PX); past that it's read as a drag. Built on raw
+ * Pointer Events rather than HTML5 drag-and-drop because native HTML5 DnD
+ * doesn't fire reliably on touch devices — Pointer Events unify mouse/
+ * touch/pen behind one API and, combined with setPointerCapture, keep
+ * routing move/up events to the tile that started the gesture even once
+ * the finger/cursor has moved elsewhere.
  *
- * Built on raw Pointer Events rather than HTML5 drag-and-drop because
- * native HTML5 DnD doesn't fire reliably on touch devices; Pointer
- * Events unify mouse/touch/pen behind one API and, combined with
- * setPointerCapture, keep routing move/up events to the tile that
- * started the drag even once the finger/cursor has moved elsewhere.
+ * Submission still goes through the exact same onAnswerText ->
+ * submitTextAnswer path (and therefore the exact same server-side
+ * grading) as identification/fill_blank — this component only changes
+ * how the text gets assembled.
  */
 function UnscrambleBoard({
   letters,
@@ -429,228 +442,254 @@ function UnscrambleBoard({
   const hasAnswered = answeredText !== null;
   const locked = (hasAnswered && !canChangeAnswer) || timeUp;
 
-  const [pool, setPool] = useState<LetterTile[]>(() => shuffleTiles(letters));
-  const [answer, setAnswer] = useState<LetterTile[]>([]);
-  const [dragging, setDragging] = useState<DragState | null>(null);
-  const [overZone, setOverZone] = useState<ScrambleZone | null>(null);
+  // Fixed set of tiles for this question (stable ids); where each one
+  // currently lives is tracked separately below.
+  const [tiles] = useState<LetterTile[]>(() => shuffleTiles(letters));
+  const tileById = new Map(tiles.map((t) => [t.id, t]));
+  // slots[i] = the tile id placed at answer position i, or null if empty.
+  // One slot per letter, so the strip is always the target word's length.
+  const [slots, setSlots] = useState<(string | null)[]>(() =>
+    tiles.map(() => null)
+  );
+  // Ids not currently placed in any slot, in pool display order.
+  const [poolOrder, setPoolOrder] = useState<string[]>(() =>
+    tiles.map((t) => t.id)
+  );
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const [overSlot, setOverSlot] = useState<number | null>(null);
+  const [overPool, setOverPool] = useState(false);
 
-  function moveTile(
-    id: string,
-    fromZone: ScrambleZone,
-    toZone: ScrambleZone,
-    targetSlotId: string | null,
-    dropBeforeSlot: boolean
-  ) {
-    const fromList = fromZone === "answer" ? answer : pool;
-    const tile = fromList.find((t) => t.id === id);
-    if (!tile) return;
-    const setFrom = fromZone === "answer" ? setAnswer : setPool;
-    const setTo = toZone === "answer" ? setAnswer : setPool;
-    const remainingFrom = fromList.filter((t) => t.id !== id);
-    // Base the insertion index off the target list with the dragged tile
-    // already removed (remainingFrom when reordering in place, the
-    // target's current contents otherwise) — indexing against a list
-    // that still includes the tile being moved is the classic off-by-one
-    // trap for in-place reordering.
-    const targetList =
-      toZone === fromZone ? remainingFrom : toZone === "answer" ? answer : pool;
-    let insertIndex = targetList.length;
-    if (targetSlotId) {
-      const slotIndex = targetList.findIndex((t) => t.id === targetSlotId);
-      if (slotIndex >= 0) insertIndex = dropBeforeSlot ? slotIndex : slotIndex + 1;
-    }
-    const nextTarget = [...targetList];
-    nextTarget.splice(insertIndex, 0, tile);
+  function placeInNextSlot(tileId: string) {
+    if (locked) return;
+    const idx = slots.indexOf(null);
+    if (idx === -1) return; // no empty slot to place into
+    const nextSlots = [...slots];
+    nextSlots[idx] = tileId;
+    setSlots(nextSlots);
+    setPoolOrder(poolOrder.filter((id) => id !== tileId));
+  }
 
-    if (fromZone === toZone) {
-      setFrom(nextTarget);
+  function removeFromSlot(index: number) {
+    if (locked) return;
+    const tileId = slots[index];
+    if (!tileId) return;
+    const nextSlots = [...slots];
+    nextSlots[index] = null;
+    setSlots(nextSlots);
+    setPoolOrder([...poolOrder, tileId]);
+  }
+
+  /** Drag-drop a tile onto a specific slot — from the pool (bumping
+   * whatever was already there back to the pool), or from another slot
+   * (swapping the two). */
+  function placeAt(tileId: string, targetIndex: number) {
+    if (locked) return;
+    const currentIndex = slots.indexOf(tileId);
+    const occupantId = slots[targetIndex];
+    if (currentIndex === targetIndex) return; // dropped back where it started
+    const nextSlots = [...slots];
+    if (currentIndex !== -1) {
+      // Slot -> slot: swap the two tiles' positions.
+      nextSlots[currentIndex] = occupantId;
+      nextSlots[targetIndex] = tileId;
+      setSlots(nextSlots);
     } else {
-      setFrom(remainingFrom);
-      setTo(nextTarget);
+      // Pool -> slot: place it, bumping any occupant back to the pool.
+      nextSlots[targetIndex] = tileId;
+      setSlots(nextSlots);
+      let nextPool = poolOrder.filter((id) => id !== tileId);
+      if (occupantId) nextPool = [...nextPool, occupantId];
+      setPoolOrder(nextPool);
     }
+  }
+
+  /** Drag a placed tile back out to the pool. */
+  function unplace(tileId: string) {
+    if (locked) return;
+    const idx = slots.indexOf(tileId);
+    if (idx === -1) return;
+    const nextSlots = [...slots];
+    nextSlots[idx] = null;
+    setSlots(nextSlots);
+    setPoolOrder([...poolOrder, tileId]);
   }
 
   function handlePointerDown(
     e: React.PointerEvent<HTMLButtonElement>,
-    tile: LetterTile,
-    zone: ScrambleZone
+    tileId: string,
+    fromSlot: number | null
   ) {
     if (locked) return;
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDragging({
-      id: tile.id,
-      letter: tile.letter,
-      fromZone: zone,
+    setDrag({
+      id: tileId,
+      fromSlot,
       pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
       x: e.clientX,
       y: e.clientY,
       offsetX: e.clientX - rect.left,
       offsetY: e.clientY - rect.top,
       width: rect.width,
       height: rect.height,
+      moved: false,
     });
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLButtonElement>) {
-    if (!dragging || e.pointerId !== dragging.pointerId) return;
-    setDragging((d) => (d ? { ...d, x: e.clientX, y: e.clientY } : d));
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    const zoneEl = el?.closest("[data-dropzone]") as HTMLElement | null;
-    setOverZone((zoneEl?.dataset.dropzone as ScrambleZone | undefined) ?? null);
-  }
-
-  function finishDrag(e: React.PointerEvent<HTMLButtonElement>) {
-    if (!dragging || e.pointerId !== dragging.pointerId) return;
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    const zoneEl = el?.closest("[data-dropzone]") as HTMLElement | null;
-    const toZone =
-      (zoneEl?.dataset.dropzone as ScrambleZone | undefined) ?? dragging.fromZone;
-    const slotEl = el?.closest("[data-tile-slot]") as HTMLElement | null;
-    let targetSlotId: string | null = null;
-    let dropBeforeSlot = true;
-    if (slotEl && slotEl.dataset.tileSlot !== dragging.id) {
-      targetSlotId = slotEl.dataset.tileSlot ?? null;
-      const rect = slotEl.getBoundingClientRect();
-      dropBeforeSlot = e.clientX < rect.left + rect.width / 2;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    const moved = drag.moved || Math.hypot(dx, dy) > DRAG_THRESHOLD_PX;
+    setDrag({ ...drag, x: e.clientX, y: e.clientY, moved });
+    if (moved) {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const slotEl = el?.closest("[data-slot-index]") as HTMLElement | null;
+      const poolEl = el?.closest("[data-dropzone='pool']");
+      setOverSlot(slotEl ? Number(slotEl.dataset.slotIndex) : null);
+      setOverPool(!!poolEl);
     }
-    moveTile(dragging.id, dragging.fromZone, toZone, targetSlotId, dropBeforeSlot);
-    setDragging(null);
-    setOverZone(null);
   }
 
-  function cancelDrag() {
-    // Pointer capture lost / gesture cancelled (e.g. a browser gesture
-    // took over mid-touch) — snap back to wherever the tile already was,
-    // nothing to persist.
-    setDragging(null);
-    setOverZone(null);
+  function finishGesture(e: React.PointerEvent<HTMLButtonElement>) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    if (!drag.moved) {
+      // A tap, not a drag: pool letter -> next empty slot; placed letter -> removed.
+      if (drag.fromSlot !== null) removeFromSlot(drag.fromSlot);
+      else placeInNextSlot(drag.id);
+    } else {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const slotEl = el?.closest("[data-slot-index]") as HTMLElement | null;
+      if (slotEl) {
+        placeAt(drag.id, Number(slotEl.dataset.slotIndex));
+      } else if (drag.fromSlot !== null) {
+        // Dropped outside any slot (pool area or elsewhere) — send it back.
+        unplace(drag.id);
+      }
+    }
+    setDrag(null);
+    setOverSlot(null);
+    setOverPool(false);
+  }
+
+  function cancelGesture() {
+    // Pointer capture lost / gesture cancelled mid-flight — leave
+    // placement untouched, nothing to persist.
+    setDrag(null);
+    setOverSlot(null);
+    setOverPool(false);
   }
 
   function handleSubmit() {
-    if (locked || answer.length === 0) return;
-    onSubmit(answer.map((t) => t.letter).join(""));
+    const assembled = slots
+      .filter((id): id is string => id !== null)
+      .map((id) => tileById.get(id)!.letter)
+      .join("");
+    if (locked || assembled.length === 0) return;
+    onSubmit(assembled);
   }
 
+  const filledCount = slots.filter((s) => s !== null).length;
   const tileHandlers = {
-    onPointerDown: handlePointerDown,
     onPointerMove: handlePointerMove,
-    onPointerUp: finishDrag,
-    onPointerCancel: cancelDrag,
+    onPointerUp: finishGesture,
+    onPointerCancel: cancelGesture,
   };
 
   return (
     <div className="flex flex-col gap-4">
-      <div
-        data-dropzone="answer"
-        className={`min-h-16 flex flex-wrap content-start items-center gap-2 rounded-2xl border-2 border-dashed p-3 transition-colors ${
-          overZone === "answer"
-            ? "border-mango bg-mango/10"
-            : "border-ink-3 bg-ink-2/50"
-        }`}
-      >
-        {answer.length === 0 && (
-          <span className="px-2 text-sm text-sampaguita/30">
-            Drag letters here to spell out your answer…
-          </span>
-        )}
-        {answer.map((tile) => (
-          <ScrambleTile
-            key={tile.id}
-            tile={tile}
-            zone="answer"
-            isDragging={dragging?.id === tile.id}
-            locked={locked}
-            {...tileHandlers}
-          />
-        ))}
+      <div className="flex flex-wrap justify-center gap-2">
+        {slots.map((tileId, i) => {
+          const tile = tileId ? tileById.get(tileId) : null;
+          const isDraggingThis = drag?.id === tileId;
+          return (
+            <div
+              key={i}
+              data-slot-index={i}
+              className={`relative w-11 h-11 rounded-xl border-2 transition-colors ${
+                overSlot === i
+                  ? "border-mango bg-mango/10"
+                  : "border-dashed border-ink-3 bg-ink-2/50"
+              }`}
+            >
+              {tile && (
+                <button
+                  type="button"
+                  disabled={locked}
+                  onPointerDown={(e) => handlePointerDown(e, tile.id, i)}
+                  {...tileHandlers}
+                  aria-label={`Letter ${tile.letter}, tap to remove`}
+                  className={`absolute inset-0 flex touch-none select-none items-center justify-center rounded-xl font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)] transition-opacity ${
+                    isDraggingThis ? "opacity-0" : "bg-ube text-cloud opacity-100"
+                  } ${locked ? "cursor-default" : "cursor-pointer active:cursor-grabbing"}`}
+                >
+                  {tile.letter}
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div
         data-dropzone="pool"
         className={`flex min-h-16 flex-wrap justify-center items-center gap-2 rounded-2xl p-2 transition-colors ${
-          overZone === "pool" ? "bg-mango/10" : ""
+          overPool ? "bg-mango/10" : ""
         }`}
       >
-        {pool.map((tile) => (
-          <ScrambleTile
-            key={tile.id}
-            tile={tile}
-            zone="pool"
-            isDragging={dragging?.id === tile.id}
-            locked={locked}
-            {...tileHandlers}
-          />
-        ))}
+        {poolOrder.length === 0 && (
+          <span className="px-2 text-sm text-sampaguita/30">
+            All letters placed — submit, or tap one above to swap it back.
+          </span>
+        )}
+        {poolOrder.map((tileId) => {
+          const tile = tileById.get(tileId)!;
+          const isDraggingThis = drag?.id === tileId;
+          return (
+            <button
+              key={tile.id}
+              type="button"
+              disabled={locked}
+              onPointerDown={(e) => handlePointerDown(e, tile.id, null)}
+              {...tileHandlers}
+              aria-label={`Letter ${tile.letter}, tap to place`}
+              className={`flex touch-none select-none items-center justify-center w-11 h-11 rounded-xl font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)] transition-opacity ${
+                isDraggingThis ? "opacity-0" : "bg-ube text-cloud opacity-100"
+              } ${locked ? "cursor-default" : "cursor-pointer active:cursor-grabbing"}`}
+            >
+              {tile.letter}
+            </button>
+          );
+        })}
       </div>
 
       <Button
         type="button"
         size="lg"
         onClick={handleSubmit}
-        disabled={locked || answer.length === 0}
+        disabled={locked || filledCount === 0}
       >
         {hasAnswered ? (canChangeAnswer ? "Update answer" : "Submitted") : "Submit answer"}
       </Button>
 
-      {dragging && (
+      {drag && (
         <div
           className="pointer-events-none fixed z-50 flex items-center justify-center rounded-xl bg-ube text-cloud font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)]"
           style={{
-            left: dragging.x - dragging.offsetX,
-            top: dragging.y - dragging.offsetY,
-            width: dragging.width,
-            height: dragging.height,
+            left: drag.x - drag.offsetX,
+            top: drag.y - drag.offsetY,
+            width: drag.width,
+            height: drag.height,
           }}
           aria-hidden="true"
         >
-          {dragging.letter}
+          {tileById.get(drag.id)?.letter}
         </div>
       )}
     </div>
-  );
-}
-
-function ScrambleTile({
-  tile,
-  zone,
-  isDragging,
-  locked,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp,
-  onPointerCancel,
-}: {
-  tile: LetterTile;
-  zone: ScrambleZone;
-  isDragging: boolean;
-  locked: boolean;
-  onPointerDown: (
-    e: React.PointerEvent<HTMLButtonElement>,
-    tile: LetterTile,
-    zone: ScrambleZone
-  ) => void;
-  onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void;
-  onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => void;
-  onPointerCancel: (e: React.PointerEvent<HTMLButtonElement>) => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-tile-slot={tile.id}
-      disabled={locked}
-      onPointerDown={(e) => onPointerDown(e, tile, zone)}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerCancel}
-      aria-label={`Letter ${tile.letter}`}
-      className={`flex touch-none select-none items-center justify-center w-11 h-11 rounded-xl font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)] transition-opacity ${
-        isDragging ? "opacity-0" : "bg-ube text-cloud opacity-100"
-      } ${locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"}`}
-    >
-      {tile.letter}
-    </button>
   );
 }
 
