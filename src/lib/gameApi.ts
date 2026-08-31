@@ -375,6 +375,7 @@ export async function getAnswerReveal(
     yourPointsEarned: row.out_your_points,
     wasCorrect: row.out_was_correct,
     percentCorrect: row.out_percent_correct,
+    streakBonus: row.out_streak_bonus,
   };
 }
 
@@ -403,6 +404,7 @@ export async function getLeaderboard(gameId: string): Promise<LeaderboardEntry[]
     score: row.out_score,
     rank: row.out_rank,
     scoreDelta: row.out_score_delta,
+    streakBonus: row.out_streak_bonus,
   }));
 }
 

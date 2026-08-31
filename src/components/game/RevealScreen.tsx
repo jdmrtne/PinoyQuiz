@@ -115,6 +115,11 @@ export function RevealScreen({
             <p className="font-display text-3xl font-bold text-mango">
               +{reveal.yourPointsEarned}
             </p>
+            {reveal.streakBonus > 0 && (
+              <p className="text-xs font-semibold text-bagoong mt-0.5">
+                +{reveal.streakBonus} streak bonus
+              </p>
+            )}
           </div>
           <div className="text-right">
             <p className="text-xs uppercase tracking-wide text-sampaguita/50">

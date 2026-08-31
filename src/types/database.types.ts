@@ -126,6 +126,10 @@ export interface Database {
             maxSpeedBonus: number;
             incorrectPoints: number;
             noAnswerPoints: number;
+            /** Added 0039_streak_scoring.sql. */
+            streakBonusPerCorrect: number;
+            /** Added 0039_streak_scoring.sql. */
+            maxStreakBonus: number;
           };
           current_question_index: number;
           current_question_id: string | null;
@@ -165,6 +169,8 @@ export interface Database {
           last_seen_at: string;
           /** Added 0038_player_avatars.sql. Format "avatar-NN" — see src/data/avatars.ts for the catalog. */
           avatar_id: string;
+          /** Added 0039_streak_scoring.sql. Consecutive correct answers, most recent question backwards; reset on a wrong/no answer or play_again. */
+          current_streak: number;
         };
         Insert: Partial<Database["public"]["Tables"]["players"]["Row"]>;
         Update: Partial<Database["public"]["Tables"]["players"]["Row"]>;
@@ -246,6 +252,10 @@ export interface Database {
           is_correct: boolean;
           response_time_ms: number | null;
           points: number;
+          /** Added 0039_streak_scoring.sql. Player's current_streak entering this question — anchor for recomputing streak_bonus on resubmission. */
+          streak_before: number;
+          /** Added 0039_streak_scoring.sql. Portion of `points` earned from the streak bonus (subset of points, not additional). */
+          streak_bonus: number;
           created_at: string;
         };
         Insert: Partial<Database["public"]["Tables"]["answers"]["Row"]>;
@@ -446,6 +456,8 @@ export interface Database {
           out_your_points: number;
           out_was_correct: boolean;
           out_percent_correct: number;
+          /** Added 0039_streak_scoring.sql. */
+          out_streak_bonus: number;
         }[];
       };
       advance_to_leaderboard: {
@@ -460,6 +472,8 @@ export interface Database {
           out_score: number;
           out_rank: number;
           out_score_delta: number;
+          /** Added 0039_streak_scoring.sql. */
+          out_streak_bonus: number;
         }[];
       };
       advance_question: {

@@ -85,8 +85,13 @@ export function LeaderboardScreen({
                   )}
                 </span>
                 {entry.scoreDelta > 0 && (
-                  <span className="text-xs font-bold text-bagoong">
+                  <span className="text-xs font-bold text-bagoong text-right">
                     +{entry.scoreDelta}
+                    {entry.streakBonus > 0 && (
+                      <span className="block font-normal text-mango">
+                        +{entry.streakBonus} streak
+                      </span>
+                    )}
                   </span>
                 )}
                 <span className="font-display font-bold text-lg text-mango tabular-nums">

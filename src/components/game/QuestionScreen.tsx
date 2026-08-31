@@ -451,13 +451,16 @@ function UnscrambleBoard({
   const [slots, setSlots] = useState<(string | null)[]>(() =>
     tiles.map(() => null)
   );
-  // Ids not currently placed in any slot, in pool display order.
-  const [poolOrder, setPoolOrder] = useState<string[]>(() =>
-    tiles.map((t) => t.id)
-  );
   const [drag, setDrag] = useState<DragState | null>(null);
   const [overSlot, setOverSlot] = useState<number | null>(null);
   const [overPool, setOverPool] = useState(false);
+
+  // A tile is "in the pool" whenever it's not currently sitting in a slot.
+  // The pool is always rendered in the tiles' original (shuffled) order —
+  // each tile keeps the exact same spot in the grid for the whole
+  // question, whether it's active or placed, so placing/removing a tile
+  // never reflows its neighbors.
+  const placedIds = new Set(slots.filter((id): id is string => id !== null));
 
   function placeInNextSlot(tileId: string) {
     if (locked) return;
@@ -466,7 +469,6 @@ function UnscrambleBoard({
     const nextSlots = [...slots];
     nextSlots[idx] = tileId;
     setSlots(nextSlots);
-    setPoolOrder(poolOrder.filter((id) => id !== tileId));
   }
 
   function removeFromSlot(index: number) {
@@ -476,7 +478,6 @@ function UnscrambleBoard({
     const nextSlots = [...slots];
     nextSlots[index] = null;
     setSlots(nextSlots);
-    setPoolOrder([...poolOrder, tileId]);
   }
 
   /** Drag-drop a tile onto a specific slot — from the pool (bumping
@@ -497,9 +498,6 @@ function UnscrambleBoard({
       // Pool -> slot: place it, bumping any occupant back to the pool.
       nextSlots[targetIndex] = tileId;
       setSlots(nextSlots);
-      let nextPool = poolOrder.filter((id) => id !== tileId);
-      if (occupantId) nextPool = [...nextPool, occupantId];
-      setPoolOrder(nextPool);
     }
   }
 
@@ -511,7 +509,6 @@ function UnscrambleBoard({
     const nextSlots = [...slots];
     nextSlots[idx] = null;
     setSlots(nextSlots);
-    setPoolOrder([...poolOrder, tileId]);
   }
 
   function handlePointerDown(
@@ -636,18 +633,31 @@ function UnscrambleBoard({
 
       <div
         data-dropzone="pool"
-        className={`flex min-h-16 flex-wrap justify-center items-center gap-2 rounded-2xl p-2 transition-colors ${
+        className={`relative flex min-h-16 flex-wrap justify-center items-center gap-2 rounded-2xl p-2 transition-colors ${
           overPool ? "bg-mango/10" : ""
         }`}
       >
-        {poolOrder.length === 0 && (
-          <span className="px-2 text-sm text-sampaguita/30">
+        {placedIds.size === tiles.length && (
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center px-2 text-center text-sm text-sampaguita/30">
             All letters placed — submit, or tap one above to swap it back.
           </span>
         )}
-        {poolOrder.map((tileId) => {
-          const tile = tileById.get(tileId)!;
-          const isDraggingThis = drag?.id === tileId;
+        {tiles.map((tile) => {
+          const isPlaced = placedIds.has(tile.id);
+          const isDraggingThis = drag?.id === tile.id;
+          // Placed tiles leave an invisible placeholder of the same size
+          // in their original pool spot, rather than being removed from
+          // the layout — that's what keeps every other letter from
+          // shifting position when one gets placed or removed.
+          if (isPlaced) {
+            return (
+              <span
+                key={tile.id}
+                aria-hidden="true"
+                className="w-11 h-11 flex-none"
+              />
+            );
+          }
           return (
             <button
               key={tile.id}

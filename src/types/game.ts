@@ -131,6 +131,8 @@ export interface AnswerReveal {
   yourPointsEarned: number;
   wasCorrect: boolean;
   percentCorrect: number;
+  /** Portion of yourPointsEarned attributable to the streak bonus (0 if not on a streak). Added 0039_streak_scoring.sql. */
+  streakBonus: number;
 }
 
 export interface LeaderboardEntry {
@@ -139,6 +141,8 @@ export interface LeaderboardEntry {
   score: number;
   rank: number;
   scoreDelta: number;
+  /** Portion of scoreDelta attributable to the streak bonus (0 if not on a streak). Added 0039_streak_scoring.sql. */
+  streakBonus: number;
 }
 
 /** Configurable scoring — never hard-coded into game logic (see game-engine/scoring.ts). */
@@ -147,4 +151,8 @@ export interface ScoringConfig {
   maxSpeedBonus: number;
   incorrectPoints: number;
   noAnswerPoints: number;
+  /** Points per consecutive correct answer beyond the first, added to correct answers. Added 0039_streak_scoring.sql. */
+  streakBonusPerCorrect: number;
+  /** Cap on the streak bonus portion of a single answer's points. Added 0039_streak_scoring.sql. */
+  maxStreakBonus: number;
 }

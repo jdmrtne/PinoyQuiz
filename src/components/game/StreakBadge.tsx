@@ -20,7 +20,7 @@ export function StreakBadge({
 }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border-2 border-ink-3 bg-ink-2 px-3 py-1 font-display text-sm font-bold text-mango"
+      className="inline-flex items-center gap-1.5 font-display text-sm font-bold text-mango"
       aria-label={`Streak: ${streak}`}
     >
       <span
@@ -32,7 +32,7 @@ export function StreakBadge({
         🔥
       </span>
       <span
-        className={`tabular-nums inline-block ${
+        className={`tabular-nums inline-block text-mango ${
           justIncreased ? "animate-streak-bounce" : ""
         }`}
         aria-live="polite"
