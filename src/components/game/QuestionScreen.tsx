@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
+import { StreakBadge } from "./StreakBadge";
 import { useServerTimer } from "../../hooks/useServerTimer";
 import type { CurrentQuestion } from "../../lib/gameApi";
 
@@ -12,6 +13,7 @@ export function QuestionScreen({
   answeredText,
   answeredPairing,
   answeredSequence,
+  streak,
   onAnswer,
   onAnswerText,
   onAnswerPairing,
@@ -28,6 +30,8 @@ export function QuestionScreen({
   answeredPairing: number[] | null;
   /** This player's already-submitted arrangement (sequence), or null if not answered yet. */
   answeredSequence: number[] | null;
+  /** 🔥 Current correct-answer streak, carried forward from GameRoom — see StreakBadge.tsx. */
+  streak: number;
   onAnswer: (index: number) => void;
   onAnswerText: (text: string) => void;
   onAnswerPairing: (pairing: number[]) => void;
@@ -53,6 +57,7 @@ export function QuestionScreen({
   const isTrueFalse = question.questionType === "true_false";
   const isMatching = question.questionType === "matching";
   const isSequence = question.questionType === "sequence";
+  const isScramble = question.questionType === "unscramble";
 
   const hasAnswered = isMatching
     ? answeredPairing !== null
@@ -91,6 +96,10 @@ export function QuestionScreen({
           </span>
         </div>
 
+        <div className="flex justify-center">
+          <StreakBadge streak={streak} />
+        </div>
+
         <Card className="p-6">
           <h1 className="text-xl sm:text-2xl font-bold leading-snug">
             {question.prompt}
@@ -99,10 +108,6 @@ export function QuestionScreen({
 
         {question.questionType === "image" && question.imageUrl && (
           <QuestionImage src={question.imageUrl} />
-        )}
-
-        {question.questionType === "unscramble" && question.scrambleLetters && (
-          <ScrambleTiles letters={question.scrambleLetters} />
         )}
 
         {isMatching ? (
@@ -122,6 +127,21 @@ export function QuestionScreen({
             canChangeAnswer={canChangeAnswer}
             timeUp={timeUp}
           />
+        ) : isScramble ? (
+          <UnscrambleBoard
+            // Remounts fresh on every new question (order is unique per
+            // round, questionId can repeat across a "Play Again" rematch —
+            // see GameRoom's comment on current_question_id) so the tile
+            // pool always starts fully shuffled and the answer area empty,
+            // rather than needing an effect to detect the letter set
+            // changing underneath it.
+            key={`${question.order}-${question.questionId}`}
+            letters={question.scrambleLetters ?? []}
+            answeredText={answeredText}
+            onSubmit={onAnswerText}
+            canChangeAnswer={canChangeAnswer}
+            timeUp={timeUp}
+          />
         ) : isTextType ? (
           <TextAnswerForm
             answeredText={answeredText}
@@ -131,9 +151,7 @@ export function QuestionScreen({
             placeholder={
               question.questionType === "fill_blank"
                 ? "Type the missing word or phrase…"
-                : question.questionType === "unscramble"
-                  ? "Type the unscrambled word…"
-                  : "Type your answer…"
+                : "Type your answer…"
             }
           />
         ) : (
@@ -340,27 +358,299 @@ function TextAnswerForm({
   );
 }
 
+/** A single scrambled letter, carrying its own id so two tiles with the
+ * same letter (e.g. the two "A"s in MANILA) still drag/drop and reorder
+ * independently instead of being indistinguishable by value alone. */
+interface LetterTile {
+  id: string;
+  letter: string;
+}
+
+type ScrambleZone = "pool" | "answer";
+
+function shuffleTiles(letters: string[]): LetterTile[] {
+  const tiles = letters.map((letter, i) => ({
+    id: `t${i}-${Math.random().toString(36).slice(2, 9)}`,
+    letter,
+  }));
+  // Fisher-Yates — re-shuffled fresh every time this runs (component
+  // mount, i.e. every new question — see the `key` on UnscrambleBoard's
+  // call site in the parent).
+  for (let i = tiles.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+  }
+  return tiles;
+}
+
+/** Pointer (mouse + touch + pen, unified) drag state for the tile
+ * currently being dragged, if any. */
+interface DragState {
+  id: string;
+  letter: string;
+  fromZone: ScrambleZone;
+  pointerId: number;
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+}
+
 /**
- * Purely decorative letter tiles — unscramble is graded through the same
- * typed-text submission as identification/fill_blank (TextAnswerForm,
- * rendered right below this by the parent), so these tiles don't carry
- * any answer state themselves. They exist to make "unscramble" visually
- * distinct from "type the answer to this question" per the brief ("add a
- * visual interaction that makes this feel different from normal
- * identification").
+ * Unscramble, drag & drop: the scrambled word starts as loose letter
+ * tiles in the pool below; the player drags tiles up into the answer
+ * strip to spell out a word, in any order, and can drag tiles back out
+ * or reorder them within the strip before submitting. Submission still
+ * goes through the exact same onAnswerText -> submitTextAnswer path (and
+ * therefore the exact same server-side grading) as identification/
+ * fill_blank — this component only changes how the text gets assembled.
+ *
+ * Built on raw Pointer Events rather than HTML5 drag-and-drop because
+ * native HTML5 DnD doesn't fire reliably on touch devices; Pointer
+ * Events unify mouse/touch/pen behind one API and, combined with
+ * setPointerCapture, keep routing move/up events to the tile that
+ * started the drag even once the finger/cursor has moved elsewhere.
  */
-function ScrambleTiles({ letters }: { letters: string[] }) {
+function UnscrambleBoard({
+  letters,
+  answeredText,
+  onSubmit,
+  canChangeAnswer,
+  timeUp,
+}: {
+  letters: string[];
+  answeredText: string | null;
+  onSubmit: (text: string) => void;
+  canChangeAnswer: boolean;
+  timeUp: boolean;
+}) {
+  const hasAnswered = answeredText !== null;
+  const locked = (hasAnswered && !canChangeAnswer) || timeUp;
+
+  const [pool, setPool] = useState<LetterTile[]>(() => shuffleTiles(letters));
+  const [answer, setAnswer] = useState<LetterTile[]>([]);
+  const [dragging, setDragging] = useState<DragState | null>(null);
+  const [overZone, setOverZone] = useState<ScrambleZone | null>(null);
+
+  function moveTile(
+    id: string,
+    fromZone: ScrambleZone,
+    toZone: ScrambleZone,
+    targetSlotId: string | null,
+    dropBeforeSlot: boolean
+  ) {
+    const fromList = fromZone === "answer" ? answer : pool;
+    const tile = fromList.find((t) => t.id === id);
+    if (!tile) return;
+    const setFrom = fromZone === "answer" ? setAnswer : setPool;
+    const setTo = toZone === "answer" ? setAnswer : setPool;
+    const remainingFrom = fromList.filter((t) => t.id !== id);
+    // Base the insertion index off the target list with the dragged tile
+    // already removed (remainingFrom when reordering in place, the
+    // target's current contents otherwise) — indexing against a list
+    // that still includes the tile being moved is the classic off-by-one
+    // trap for in-place reordering.
+    const targetList =
+      toZone === fromZone ? remainingFrom : toZone === "answer" ? answer : pool;
+    let insertIndex = targetList.length;
+    if (targetSlotId) {
+      const slotIndex = targetList.findIndex((t) => t.id === targetSlotId);
+      if (slotIndex >= 0) insertIndex = dropBeforeSlot ? slotIndex : slotIndex + 1;
+    }
+    const nextTarget = [...targetList];
+    nextTarget.splice(insertIndex, 0, tile);
+
+    if (fromZone === toZone) {
+      setFrom(nextTarget);
+    } else {
+      setFrom(remainingFrom);
+      setTo(nextTarget);
+    }
+  }
+
+  function handlePointerDown(
+    e: React.PointerEvent<HTMLButtonElement>,
+    tile: LetterTile,
+    zone: ScrambleZone
+  ) {
+    if (locked) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging({
+      id: tile.id,
+      letter: tile.letter,
+      fromZone: zone,
+      pointerId: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+  }
+
+  function handlePointerMove(e: React.PointerEvent<HTMLButtonElement>) {
+    if (!dragging || e.pointerId !== dragging.pointerId) return;
+    setDragging((d) => (d ? { ...d, x: e.clientX, y: e.clientY } : d));
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const zoneEl = el?.closest("[data-dropzone]") as HTMLElement | null;
+    setOverZone((zoneEl?.dataset.dropzone as ScrambleZone | undefined) ?? null);
+  }
+
+  function finishDrag(e: React.PointerEvent<HTMLButtonElement>) {
+    if (!dragging || e.pointerId !== dragging.pointerId) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const zoneEl = el?.closest("[data-dropzone]") as HTMLElement | null;
+    const toZone =
+      (zoneEl?.dataset.dropzone as ScrambleZone | undefined) ?? dragging.fromZone;
+    const slotEl = el?.closest("[data-tile-slot]") as HTMLElement | null;
+    let targetSlotId: string | null = null;
+    let dropBeforeSlot = true;
+    if (slotEl && slotEl.dataset.tileSlot !== dragging.id) {
+      targetSlotId = slotEl.dataset.tileSlot ?? null;
+      const rect = slotEl.getBoundingClientRect();
+      dropBeforeSlot = e.clientX < rect.left + rect.width / 2;
+    }
+    moveTile(dragging.id, dragging.fromZone, toZone, targetSlotId, dropBeforeSlot);
+    setDragging(null);
+    setOverZone(null);
+  }
+
+  function cancelDrag() {
+    // Pointer capture lost / gesture cancelled (e.g. a browser gesture
+    // took over mid-touch) — snap back to wherever the tile already was,
+    // nothing to persist.
+    setDragging(null);
+    setOverZone(null);
+  }
+
+  function handleSubmit() {
+    if (locked || answer.length === 0) return;
+    onSubmit(answer.map((t) => t.letter).join(""));
+  }
+
+  const tileHandlers = {
+    onPointerDown: handlePointerDown,
+    onPointerMove: handlePointerMove,
+    onPointerUp: finishDrag,
+    onPointerCancel: cancelDrag,
+  };
+
   return (
-    <div className="flex flex-wrap justify-center gap-2" aria-hidden="true">
-      {letters.map((ch, i) => (
-        <span
-          key={i}
-          className="flex items-center justify-center w-11 h-11 rounded-xl bg-ube text-cloud font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)]"
+    <div className="flex flex-col gap-4">
+      <div
+        data-dropzone="answer"
+        className={`min-h-16 flex flex-wrap content-start items-center gap-2 rounded-2xl border-2 border-dashed p-3 transition-colors ${
+          overZone === "answer"
+            ? "border-mango bg-mango/10"
+            : "border-ink-3 bg-ink-2/50"
+        }`}
+      >
+        {answer.length === 0 && (
+          <span className="px-2 text-sm text-sampaguita/30">
+            Drag letters here to spell out your answer…
+          </span>
+        )}
+        {answer.map((tile) => (
+          <ScrambleTile
+            key={tile.id}
+            tile={tile}
+            zone="answer"
+            isDragging={dragging?.id === tile.id}
+            locked={locked}
+            {...tileHandlers}
+          />
+        ))}
+      </div>
+
+      <div
+        data-dropzone="pool"
+        className={`flex min-h-16 flex-wrap justify-center items-center gap-2 rounded-2xl p-2 transition-colors ${
+          overZone === "pool" ? "bg-mango/10" : ""
+        }`}
+      >
+        {pool.map((tile) => (
+          <ScrambleTile
+            key={tile.id}
+            tile={tile}
+            zone="pool"
+            isDragging={dragging?.id === tile.id}
+            locked={locked}
+            {...tileHandlers}
+          />
+        ))}
+      </div>
+
+      <Button
+        type="button"
+        size="lg"
+        onClick={handleSubmit}
+        disabled={locked || answer.length === 0}
+      >
+        {hasAnswered ? (canChangeAnswer ? "Update answer" : "Submitted") : "Submit answer"}
+      </Button>
+
+      {dragging && (
+        <div
+          className="pointer-events-none fixed z-50 flex items-center justify-center rounded-xl bg-ube text-cloud font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)]"
+          style={{
+            left: dragging.x - dragging.offsetX,
+            top: dragging.y - dragging.offsetY,
+            width: dragging.width,
+            height: dragging.height,
+          }}
+          aria-hidden="true"
         >
-          {ch}
-        </span>
-      ))}
+          {dragging.letter}
+        </div>
+      )}
     </div>
+  );
+}
+
+function ScrambleTile({
+  tile,
+  zone,
+  isDragging,
+  locked,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+}: {
+  tile: LetterTile;
+  zone: ScrambleZone;
+  isDragging: boolean;
+  locked: boolean;
+  onPointerDown: (
+    e: React.PointerEvent<HTMLButtonElement>,
+    tile: LetterTile,
+    zone: ScrambleZone
+  ) => void;
+  onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerCancel: (e: React.PointerEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-tile-slot={tile.id}
+      disabled={locked}
+      onPointerDown={(e) => onPointerDown(e, tile, zone)}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      aria-label={`Letter ${tile.letter}`}
+      className={`flex touch-none select-none items-center justify-center w-11 h-11 rounded-xl font-display font-bold text-xl uppercase shadow-[0_4px_0_0_var(--color-ube-dim)] transition-opacity ${
+        isDragging ? "opacity-0" : "bg-ube text-cloud opacity-100"
+      } ${locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"}`}
+    >
+      {tile.letter}
+    </button>
   );
 }
 

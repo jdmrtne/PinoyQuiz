@@ -58,6 +58,14 @@ export default function GameRoom() {
   const [answeredPairing, setAnsweredPairing] = useState<number[] | null>(null);
   const [answeredSequence, setAnsweredSequence] = useState<number[] | null>(null);
   const [reveal, setReveal] = useState<AnswerReveal | null>(null);
+  // 🔥 Streak — correct answers in a row, this player only. Reset to 0 by
+  // just letting it be: this is plain useState(0), so leaving/rejoining a
+  // room or starting a rematch (Results -> "Play Again" -> navigate to
+  // /game/:roomCode) remounts GameRoom and gets a fresh 0 for free, no
+  // extra reset plumbing needed. Updated exactly once per question, in the
+  // REVEAL-fetch effect below — see that effect's comment for why it lives
+  // there instead of inside handleAnswer*.
+  const [streak, setStreak] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [claimingHost, setClaimingHost] = useState(false);
@@ -192,7 +200,21 @@ export default function GameRoom() {
     let cancelled = false;
     getAnswerReveal(game.id)
       .then((r) => {
-        if (!cancelled) setReveal(r);
+        if (cancelled) return;
+        setReveal(r);
+        // Exactly one streak update per question, driven by this player's
+        // own graded correctness for the round that just ended.
+        // `wasCorrect` is false both for a wrong answer AND for "never
+        // submitted anything" (end_question fills in a no-answer row
+        // server-side), so a skipped/timed-out question resets the streak
+        // the same way a wrong one does. Doing the update here — once,
+        // after the fetch resolves — rather than inside handleAnswer*
+        // means resubmitting the same question under
+        // CHANGE_UNTIL_TIMER_ENDS can never bump the streak more than
+        // once; only the final graded answer counts. `r` can be null if
+        // the reveal payload genuinely isn't available — leave the streak
+        // untouched rather than guessing.
+        if (r) setStreak((prev) => (r.wasCorrect ? prev + 1 : 0));
       })
       .catch(() => {
         if (!cancelled) setReveal(null);
@@ -578,6 +600,7 @@ export default function GameRoom() {
           answeredText={answeredText}
           answeredPairing={answeredPairing}
           answeredSequence={answeredSequence}
+          streak={streak}
           onAnswer={handleAnswer}
           onAnswerText={handleAnswerText}
           onAnswerPairing={handleAnswerPairing}
@@ -614,6 +637,7 @@ export default function GameRoom() {
         <RevealScreen
           question={question}
           reveal={reveal}
+          streak={streak}
           isHost={isHost}
           isAutomatic={isAutomatic}
           onContinue={handleContinueToLeaderboard}

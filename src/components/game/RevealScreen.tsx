@@ -1,6 +1,7 @@
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { QuestionImage } from "./QuestionImage";
+import { StreakBadge } from "./StreakBadge";
 import type { AnswerReveal, CurrentQuestion } from "../../lib/gameApi";
 
 const OPTION_LETTERS = ["A", "B", "C", "D"] as const;
@@ -17,6 +18,7 @@ const OPTION_LETTERS = ["A", "B", "C", "D"] as const;
 export function RevealScreen({
   question,
   reveal,
+  streak,
   isHost,
   isAutomatic,
   onContinue,
@@ -24,6 +26,10 @@ export function RevealScreen({
 }: {
   question: CurrentQuestion;
   reveal: AnswerReveal;
+  /** 🔥 Streak *after* this question's result was folded in (GameRoom
+   * updates it in the same fetch that produced `reveal`, so by the time
+   * this component renders the two are already in sync). */
+  streak: number;
   isHost: boolean;
   isAutomatic: boolean;
   onContinue: () => void;
@@ -71,6 +77,10 @@ export function RevealScreen({
                 ? "Correct!"
                 : "Incorrect"}
           </span>
+        </div>
+
+        <div className="flex justify-center">
+          <StreakBadge streak={streak} justIncreased={reveal.wasCorrect} />
         </div>
 
         <Card className="p-6">
